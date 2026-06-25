@@ -1,0 +1,2346 @@
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useSEO, seoMeta } from '../lib/useSEO';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Elements } from '@stripe/react-stripe-js';
+import { colors, fonts, typography } from '../styles/tokens';
+import { site } from '../config/site';
+import { addOns as addOnData, frequencyDiscounts, PKG_DISPLAY_NAME, PRICES, SIZE_LABELS, type Frequency, type SizeKey, type Pkg } from '../data/pricing';
+import { getBasePriceForMode } from '../lib/booking/constants';
+import { getMockDaySlots, getMockMonthAvailability, isBookingApiEnabled } from '../lib/booking/mock-availability';
+import BookingStepper from '../components/ui/BookingStepper';
+import Button from '../components/ui/Button';
+import PaymentForm from '../components/ui/PaymentForm';
+import { getStripe, getStripeFor, hasStripeKey } from '../lib/stripe';
+import { clarityEvent, clarityTag, clarityUpgrade } from '../lib/clarity';
+import AddressAutocomplete, { type AddressResult } from '../components/ui/AddressAutocomplete';
+import { useTurnstile } from '../lib/useTurnstile';
+import { tracker } from '../lib/tracker';
+import QuoteIntakeForm from '../components/booking/QuoteIntakeForm';
+
+import type {
+  AvailabilitySlot,
+  MonthDaySummary,
+  SlotSelection,
+  CreateIntentResponse,
+  PromoResponse,
+} from '../lib/booking/booking-types';
+import {
+  getPrice,
+  getAvailableSlotsFallback,
+  formatCompletionTime,
+  getMonthData,
+  MONTH_NAMES,
+  DAY_HEADERS,
+  FREQUENCY_OPTIONS,
+  getMaxSlots,
+  formatCalendarSelectionLabel,
+  CAL_SELECTED_LABEL_FONT,
+} from '../lib/booking/booking-helpers';
+import { SERVICE_DESC, SERVICE_INCLUDES, ADDONS_INCLUDED_IN, PKGS } from '../lib/booking/service-meta';
+import { formatPhoneNumber, validateName, validateEmail, validatePhone, parseFlexDate } from '../lib/booking/validation';
+import { STRIPE_APPEARANCE, navBtn, emptyCell, inputStyle, textareaStyle, inlineQtyBtn, fieldError } from '../lib/booking/booking-styles';
+import { ADDON_ICONS, ADDON_ICON_SIZE, ADDON_ICON_PADDING, ADDON_CARD_GAP } from '../components/booking/addon-icons';
+
+export default function BookPage() {
+  useSEO(seoMeta.book);
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const pkgParam = params.get('pkg') || 'Essential';
+  const sizeParam = params.get('size') || 's1';
+
+  // Booking mode — drives business vs residential UI + pricing
+  const bookingMode = (params.get('mode') || 'residential') as 'residential' | 'business' | 'custom';
+  const isBusiness = bookingMode === 'business';
+  // Custom quote mode — hides scheduling + pricing, shows QuoteIntakeForm at step 3
+  const isCustom = bookingMode === 'custom';
+
+  // Booking source attribution — read from URL params set by email click redirects or UTM campaigns
+  const utmSource = params.get('utm_source') ?? undefined;
+  const utmMedium = params.get('utm_medium') ?? undefined;
+  const utmCampaign = params.get('utm_campaign') ?? undefined;
+  const refParam = params.get('ref');
+  const eidParam = params.get('eid');
+  // source='email' when arriving via a tracked email click (ref=email&eid=<email_id>)
+  // source='utm'   when arriving with any utm_ param
+  // source='direct' otherwise
+  const bookingSource: string = refParam === 'email' ? 'email' : (utmSource || utmMedium || utmCampaign) ? 'utm' : 'direct';
+  const sourceEmailId: string | undefined = refParam === 'email' ? (eidParam ?? undefined) : undefined;
+
+  // Quote conversion params (from approval email link)
+  const quoteId = params.get('quoteId');
+  const prefilledPromo = params.get('promo');
+  const isPrefill = params.get('prefill') === '1';
+  // URL params embedded by approve.ts for synchronous prefill (avoids date-format issues)
+  const prefilledDate = params.get('date');
+  const prefilledTime = params.get('time');
+  const prefilledNotes = params.get('notes');
+
+  const [step, setStep] = useState<2|3>(2);
+  // Drag-drop state for custom quote mode
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [pendingDropFiles, setPendingDropFiles] = useState<File[]>([]);
+  // Quote prefill state
+  const [quotePrefillDone, setQuotePrefillDone] = useState(false);
+  const [quoteAlreadyConverted, setQuoteAlreadyConverted] = useState(false);
+  const { containerRef: turnstileRef, getToken: getTurnstileToken, reset: resetTurnstile } = useTurnstile('booking', step === 3);
+  const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
+  const [expandedAddOn, setExpandedAddOn] = useState<string | null>(null);
+  const [selectedPkg, setSelectedPkg] = useState(pkgParam);
+  const [selectedSize, setSelectedSize] = useState(sizeParam);
+
+  /** Keep pkg/size in sync when arriving via bento links (same route, new query). */
+  const searchKey = params.toString();
+  useEffect(() => {
+    setSelectedPkg(params.get('pkg') || 'Essential');
+    setSelectedSize(params.get('size') || 's1');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchKey]);
+
+  /* frequency state */
+  const [frequency, setFrequency] = useState<Frequency>('one-time');
+
+  /* custom mode — selected services (multi-select) */
+  const [customServices, setCustomServices] = useState<string[]>([]);
+
+  /* calendar state — floor at current month */
+  const today = new Date();
+  const calendarFloorYear = today.getFullYear();
+  const calendarFloorMonth = today.getMonth();
+  const [calYear, setCalYear] = useState(calendarFloorYear);
+  const [calMonth, setCalMonth] = useState(calendarFloorMonth);
+  const canGoPrevMonth = calYear > calendarFloorYear
+    || (calYear === calendarFloorYear && calMonth > calendarFloorMonth);
+
+  /* ── API availability state ── */
+  const [monthAvailability, setMonthAvailability] = useState<Record<string, MonthDaySummary>>({});
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [daySlots, setDaySlots] = useState<Record<number, AvailabilitySlot[]>>({});
+  const [dayLoading, setDayLoading] = useState<Record<number, boolean>>({});
+
+  /* multi-slot selections */
+  const [selections, setSelections] = useState<SlotSelection[]>([]);
+  const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
+
+  const { firstDay, daysInMonth } = useMemo(() => getMonthData(calYear, calMonth), [calYear, calMonth]);
+  const bookingApiEnabled = isBookingApiEnabled();
+
+  const maxSlots = getMaxSlots();
+  const selectedDays = new Set(selections.filter(s => s.month === calMonth && s.year === calYear).map(s => s.day));
+  const allSlotsHaveTime = selections.length > 0 && selections.every(s => s.time !== null);
+  const hasMinimumSlots = selections.length >= 1;
+  const scheduleComplete = hasMinimumSlots && allSlotsHaveTime;
+
+  const hasProtocol = isCustom
+    ? customServices.length > 0
+    : Boolean(selectedPkg && selectedPkg !== 'Custom');
+  const hasFrequency = Boolean(frequency);
+  const canProceedToCheckout = hasProtocol && hasFrequency && hasMinimumSlots && allSlotsHaveTime;
+
+  const attemptContinueToStep3 = () => {
+    if (!canProceedToCheckout) return;
+    clarityEvent('booking_cta_click');
+    clarityTag('booking_package', selectedPkg);
+    tracker.bookingStep(3, { service: selectedPkg, size: selectedSize, frequency });
+    setStep(3);
+  };
+
+  /* checkout state */
+  const [selectedAddOns, setSelectedAddOns] = useState<Record<string,{on:boolean,qty:number}>>({});
+  const [jobNotes, setJobNotes] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('+1 ');
+  const [nameError, setNameError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [serviceAddress, setServiceAddress] = useState('');
+  const [serviceAddressCoords, setServiceAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [billingSameAsService, setBillingSameAsService] = useState(true);
+  const [billingAddress, setBillingAddress] = useState('');
+  const [unitNumber, setUnitNumber] = useState('');
+
+  /* business-mode state */
+  const [businessName, setBusinessName] = useState('');
+  const [propertyType, setPropertyType] = useState('');
+  const [businessNameError, setBusinessNameError] = useState('');
+
+  /* promo code state */
+  const [promoCode, setPromoCode] = useState('');
+  const [promoResult, setPromoResult] = useState<PromoResponse | null>(null);
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [appliedPromo, setAppliedPromo] = useState<string | null>(null);
+
+  /* payment / booking state */
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [customerSessionClientSecret, setCustomerSessionClientSecret] = useState<string | null>(null);
+  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  // Central-payments (Connect) — supplied by create-intent when USE_CENTRAL_PAYMENTS is on.
+  const [stripeAccount, setStripeAccount] = useState<string | undefined>(undefined);
+  const [publishableKey, setPublishableKey] = useState<string | undefined>(undefined);
+  const elementsStripe = useMemo(
+    () => (publishableKey ? getStripeFor(publishableKey, stripeAccount) : getStripe()),
+    [publishableKey, stripeAccount],
+  );
+  const [intentLoading, setIntentLoading] = useState(false);
+  const [intentError, setIntentError] = useState<string | null>(null);
+  const [freeLoading, setFreeLoading] = useState(false);
+  const [freeError, setFreeError] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  /* pricing (local) */
+  const basePrice = isBusiness
+    ? getBasePriceForMode(selectedPkg, selectedSize, 'business')
+    : getPrice(selectedPkg, selectedSize);
+  const applicableAddOns = addOnData.filter(a => !(ADDONS_INCLUDED_IN[selectedPkg] || []).includes(a.id));
+  const addOnTotal = applicableAddOns.reduce((sum, a) => {
+    const state = selectedAddOns[a.id];
+    if (!state?.on) return sum;
+    return sum + a.price * (a.unit ? state.qty : 1);
+  }, 0);
+  const discountInfo = frequencyDiscounts[frequency];
+  const perCleanSubtotal = basePrice + addOnTotal;
+  const discountAmount = Math.round(perCleanSubtotal * discountInfo.discount * 100) / 100;
+  const perCleanAfterFrequencyDiscount = perCleanSubtotal - discountAmount;
+  const totalCleans = selections.length || 1;
+  const subtotalBeforePromo = perCleanAfterFrequencyDiscount * totalCleans;
+
+  /* apply promo discount on top of frequency discount */
+  let promoDiscountAmount = 0;
+  /** For quote_price promos, this is the override total in dollars (pre-GST) */
+  let quotePriceOverrideDollars: number | null = null;
+  if (promoResult?.valid && appliedPromo) {
+    if (promoResult.type === 'quote_price' && promoResult.finalPrice != null) {
+      // quote_price sets a fixed total (cents) — derive discount from that
+      quotePriceOverrideDollars = promoResult.finalPrice / 100;
+      promoDiscountAmount = Math.max(0, subtotalBeforePromo - quotePriceOverrideDollars);
+    } else if (promoResult.type === 'free_clean') {
+      promoDiscountAmount = subtotalBeforePromo;
+    } else if (promoResult.discountAmount != null) {
+      promoDiscountAmount = promoResult.discountAmount;
+    }
+  }
+
+  /* GST is always 5% of the post-discount subtotal (never negative) */
+  const GST_RATE = 0.05;
+  // For quote_price promos: approved_amount is the GST-inclusive total (subtotal + 5% GST).
+  // Reverse-calculate the pre-tax subtotal so we don't add GST a second time.
+  // Example: admin approves $157.50 (= $150 + $7.50 GST) → subtotal = 157.50 / 1.05 = 150.00
+  const subtotalAfterAllDiscounts = quotePriceOverrideDollars != null
+    ? Math.round((quotePriceOverrideDollars / (1 + GST_RATE)) * 100) / 100
+    : Math.max(0, subtotalBeforePromo - promoDiscountAmount);
+  const gstAmount = Math.round(subtotalAfterAllDiscounts * GST_RATE * 100) / 100;
+  const grandTotal = Math.round((subtotalAfterAllDiscounts + gstAmount) * 100) / 100;
+  const isFreeBooking = grandTotal === 0;
+
+  /* per-clean values kept for display purposes */
+  const perCleanAfterDiscount = perCleanAfterFrequencyDiscount;
+  const perCleanTotal = perCleanAfterDiscount * (1 + GST_RATE);
+
+  /* ── Fetch month availability from API (or local mock in template mode) ── */
+  const fetchMonthAvailability = useCallback(async (year: number, month: number) => {
+    setMonthLoading(true);
+    try {
+      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+
+      if (!bookingApiEnabled) {
+        setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
+        return;
+      }
+
+      const url = `/api/availability/month?year=${year}&month=${month + 1}&service=${serviceKey}&homeSize=${selectedSize}`;
+      const res = await fetch(url);
+      const ct = res.headers.get('content-type') ?? '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json() as { days: Record<string, MonthDaySummary> };
+        setMonthAvailability(data.days ?? {});
+      } else {
+        setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
+      }
+    } catch {
+      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
+    } finally {
+      setMonthLoading(false);
+    }
+  }, [selectedPkg, selectedSize, isCustom, bookingApiEnabled]);
+
+  useEffect(() => {
+    fetchMonthAvailability(calYear, calMonth);
+  }, [calYear, calMonth, fetchMonthAvailability]);
+
+  /* scroll to top on step change */
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [step]);
+
+  /* Custom mode — no longer auto-skips step 2; users pick a date before the quote form */
+
+  /* ── Prefill from quote (conversion link: /book?quoteId=&promo=&prefill=1) ── */
+  useEffect(() => {
+    if (!isPrefill || !quoteId || quotePrefillDone) return;
+
+    // ── Apply URL params IMMEDIATELY (synchronous — no async wait) ────────────
+    // date, time, notes, and size are embedded in the approval email CTA URL by
+    // approve.ts so they are available without waiting for the API response.
+    // This ensures formReady becomes true early → handleContinueToCheckout fires
+    // → Stripe payment intent is created without delay.
+    if (prefilledDate) {
+      const parsed = parseFlexDate(prefilledDate);
+      if (parsed) {
+        setCalYear(parsed.year);
+        setCalMonth(parsed.month);
+        setSelections([{
+          day: parsed.day,
+          month: parsed.month,
+          year: parsed.year,
+          time: prefilledTime || null,
+          endsBy: undefined,
+        }]);
+      }
+    }
+    if (prefilledNotes) setJobNotes(prefilledNotes);
+
+    // ── Fetch quote record for name/email/phone/address/promo/size ────────────
+    fetch(`/api/quotes/${quoteId}`)
+      .then(async r => {
+        if (!r.ok) {
+          try {
+            const errData = await r.json() as { error?: string };
+            if (errData.error === 'quote_already_converted') {
+              setQuoteAlreadyConverted(true);
+            }
+          } catch { /* ignore parse errors */ }
+          return;
+        }
+        const d = await r.json() as {
+          quoteId?: string;
+          name?: string;
+          email?: string;
+          phone?: string;
+          service_address?: string;
+          unit_number?: string | null;
+          promoCode?: string | null;
+          preferred_date?: string | null;
+          preferred_time?: string | null;
+          home_size?: string | null;
+          notes?: string | null;
+          custom_services?: string | null;
+        };
+        if (d.name)            setContactName(d.name);
+        if (d.email)           setContactEmail(d.email);
+        if (d.phone)           setContactPhone(d.phone);
+        if (d.service_address) setServiceAddress(d.service_address);
+        if (d.unit_number)     setUnitNumber(d.unit_number);
+
+        // Prefill home size — URL param 'size' takes precedence, but API fills it if missing
+        if (d.home_size) setSelectedSize(d.home_size);
+
+        // Prefill custom services
+        if (d.custom_services) {
+          const svcs = d.custom_services.split(',').map(s => s.trim()).filter(Boolean);
+          if (svcs.length > 0) setCustomServices(svcs);
+        }
+
+        // Prefill date/time from API — only if URL params didn't already set them.
+        // Uses parseFlexDate to handle both ISO ("2026-05-13") and display ("May 13, 2026") formats.
+        if (!prefilledDate && d.preferred_date) {
+          const parsed = parseFlexDate(d.preferred_date);
+          if (parsed) {
+            setCalYear(parsed.year);
+            setCalMonth(parsed.month);
+            setSelections([{
+              day: parsed.day,
+              month: parsed.month,
+              year: parsed.year,
+              time: d.preferred_time || null,
+              endsBy: undefined,
+            }]);
+          }
+        }
+
+        // Prefill notes from API — only if URL params didn't already provide them
+        if (!prefilledNotes && d.notes) setJobNotes(d.notes);
+
+        // Auto-apply promo from URL param (takes precedence over quote record)
+        const promo = prefilledPromo || d.promoCode || null;
+        if (promo) {
+          const upperPromo = promo.toUpperCase();
+          setPromoCode(upperPromo);
+          // Validate the promo so it auto-applies
+          try {
+            const pRes = await fetch('/api/promo/validate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: upperPromo, service: 'Custom', basePrice: 0 }),
+            });
+            const pData = await pRes.json() as PromoResponse;
+            setPromoResult(pData);
+            if (pData.valid) setAppliedPromo(upperPromo);
+          } catch {
+            // promo validate failed — leave unapplied
+          }
+        }
+
+        setQuotePrefillDone(true);
+
+        // Skip directly to step 3 — user should NOT see step 2 again
+        // The auto-create-intent effect will fire once formReady becomes true
+        setStep(3);
+      })
+      .catch(() => { /* ignore — leave form with defaults */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPrefill, quoteId]);
+
+  /* ── Get available days from API response ── */
+  const available = useMemo(() => {
+    const set = new Set<number>();
+    Object.entries(monthAvailability).forEach(([dateStr, summary]) => {
+      if (summary.available && summary.slotCount > 0) {
+        const day = parseInt(dateStr.split('-')[2], 10);
+        set.add(day);
+      }
+    });
+    return set;
+  }, [monthAvailability]);
+
+  const getSlotCountForDay = (day: number): number => {
+    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    return monthAvailability[dateStr]?.slotCount ?? 0;
+  };
+
+  /* ── Fetch time slots for a specific day ── */
+  const fetchDaySlots = useCallback(async (day: number) => {
+    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    setDayLoading(prev => ({ ...prev, [day]: true }));
+    try {
+      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      const fallback = getMockDaySlots(serviceKey, selectedSize);
+
+      if (!bookingApiEnabled) {
+        setDaySlots(prev => ({ ...prev, [day]: fallback }));
+        return;
+      }
+
+      const url = `/api/availability?date=${dateStr}&service=${serviceKey}&homeSize=${selectedSize}`;
+      const res = await fetch(url);
+      const ct = res.headers.get('content-type') ?? '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json() as { slots: AvailabilitySlot[]; available: boolean };
+        setDaySlots(prev => ({ ...prev, [day]: data.slots ?? [] }));
+      } else {
+        setDaySlots(prev => ({ ...prev, [day]: fallback }));
+      }
+    } catch {
+      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      setDaySlots(prev => ({ ...prev, [day]: getMockDaySlots(serviceKey, selectedSize) }));
+    } finally {
+      setDayLoading(prev => ({ ...prev, [day]: false }));
+    }
+  }, [calYear, calMonth, selectedPkg, selectedSize, isCustom, bookingApiEnabled]);
+
+  /* When active slot changes, fetch its day slots */
+  useEffect(() => {
+    if (activeSlotIndex !== null && selections[activeSlotIndex]) {
+      const day = selections[activeSlotIndex].day;
+      if (!daySlots[day]) {
+        fetchDaySlots(day);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSlotIndex]);
+
+  /* ── Promo code validation ── */
+  const handlePromoValidate = async () => {
+    if (!promoCode.trim()) return;
+    setPromoLoading(true);
+    setPromoResult(null);
+    try {
+      const res = await fetch('/api/promo/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: promoCode.trim(),
+          service: selectedPkg,
+          basePrice: perCleanSubtotal,
+        }),
+      });
+      const data = await res.json() as PromoResponse;
+      setPromoResult(data);
+      if (data.valid) setAppliedPromo(promoCode.trim().toUpperCase());
+    } catch {
+      setPromoResult({ valid: false, reason: 'Could not validate promo code.' });
+    } finally {
+      setPromoLoading(false);
+    }
+  };
+
+  /* ── Continue to Checkout: call create-intent ── */
+  const handleContinueToCheckout = async () => {
+    setIntentError(null);
+    setIntentLoading(true);
+
+    const primarySelection = selections[0];
+    if (!primarySelection || !primarySelection.time) {
+      setIntentError('Please select a date and time before continuing.');
+      setIntentLoading(false);
+      return;
+    }
+
+    // Guard: contact info must be filled before sending to backend
+    if (validateName(contactName) || validateEmail(contactEmail) || validatePhone(contactPhone)) {
+      setIntentError('Please fill in your contact information.');
+      setIntentLoading(false);
+      return;
+    }
+
+    // Guard: business fields required in business mode
+    if (isBusiness && !businessName.trim()) {
+      setIntentError('Please enter your business name.');
+      setIntentLoading(false);
+      return;
+    }
+    if (isBusiness && !propertyType) {
+      setIntentError('Please select a property type.');
+      setIntentLoading(false);
+      return;
+    }
+
+    // Get Turnstile token (invisible widget — usually instant)
+    let turnstileToken = '';
+    try {
+      turnstileToken = await getTurnstileToken();
+    } catch {
+      // Token fetch timed out — proceed without it; backend will soft-fail gracefully
+      console.warn('[turnstile] token timeout — proceeding without');
+    }
+
+    const dateStr = `${primarySelection.year}-${String(primarySelection.month + 1).padStart(2,'0')}-${String(primarySelection.day).padStart(2,'0')}`;
+    const timeStr = primarySelection.time;
+
+    const addOnsPayload = applicableAddOns
+      .filter(a => selectedAddOns[a.id]?.on)
+      .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
+
+    try {
+      const res = await fetch('/api/bookings/create-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contactName,
+          email: contactEmail,
+          phone: contactPhone,
+          service: selectedPkg,
+          homeSize: selectedSize,
+          date: dateStr,
+          time: timeStr,
+          addOns: addOnsPayload,
+          notes: jobNotes,
+          promoCode: appliedPromo ?? undefined,
+          frequency,
+          serviceAddress: unitNumber ? `${serviceAddress}${unitNumber ? ', Unit ' + unitNumber : ''}` : serviceAddress,
+          ...(serviceAddressCoords ? { lat: serviceAddressCoords.lat, lng: serviceAddressCoords.lng } : {}),
+          turnstileToken,
+          // Source attribution
+          source: bookingSource,
+          utmSource,
+          utmMedium,
+          utmCampaign,
+          sourceEmailId,
+          // Business mode fields
+          ...(isBusiness && {
+            mode: 'business',
+            business_name: businessName,
+            property_type: propertyType,
+          }),
+        }),
+      });
+
+      const data = await res.json() as CreateIntentResponse & { error?: string };
+
+      if (!res.ok) {
+        setIntentError(data.error ?? 'Booking failed. Please try again.');
+        resetTurnstile();
+        setIntentLoading(false);
+        return;
+      }
+
+      if (data.paymentIntentId) setPaymentIntentId(data.paymentIntentId);
+      setStripeAccount(data.stripeAccount);
+      setPublishableKey(data.publishableKey);
+
+      if (data.isFree || data.clientSecret === null) {
+        setClientSecret(null);
+        setCustomerSessionClientSecret(null);
+      } else {
+        setClientSecret(data.clientSecret);
+        if (data.customerSessionClientSecret) setCustomerSessionClientSecret(data.customerSessionClientSecret);
+      }
+      clarityEvent('booking_details_complete');
+      clarityTag('booking_package', selectedPkg);
+      clarityTag('booking_size', selectedSize);
+      clarityUpgrade('booking_checkout');
+      tracker.bookingStep(2, { service: selectedPkg, size: selectedSize });
+      setStep(3);
+    } catch {
+      setIntentError('Network error. Please check your connection and try again.');
+    } finally {
+      setIntentLoading(false);
+    }
+  };
+
+
+  /* ── Auto-create intent: fires when step=3 AND all required fields are valid ── */
+  const formReady = step === 3
+    && !isCustom
+    && !clientSecret
+    && !paymentIntentId
+    && !isFreeBooking
+    && !intentLoading
+    && !intentError
+    && selections.length > 0
+    && !!selections[0]?.time
+    && !validateName(contactName)
+    && !validateEmail(contactEmail)
+    && !validatePhone(contactPhone)
+    && !!serviceAddress
+    && (!isBusiness || (businessName.trim().length > 0 && propertyType.length > 0));
+
+  useEffect(() => {
+    if (formReady) {
+      handleContinueToCheckout();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formReady]);
+
+  /* ── Update intent amount when cart changes on step 3 ── */
+  useEffect(() => {
+    if (step !== 3 || !paymentIntentId || isFreeBooking) return;
+    const addOnsPayload = applicableAddOns
+      .filter(a => selectedAddOns[a.id]?.on)
+      .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
+
+    fetch('/api/bookings/update-intent', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paymentIntentId,
+        service: selectedPkg,
+        homeSize: selectedSize,
+        addOns: addOnsPayload,
+        promoCode: appliedPromo ?? undefined,
+        frequency,
+      }),
+    }).catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAddOns, appliedPromo, frequency]);
+
+
+  /* ── Build booking success state for /booking-success redirect ── */
+  const buildSuccessState = () => {
+    const primarySel = [...selections].sort((a, b) => (a.year - b.year) || (a.month - b.month) || (a.day - b.day))[0] ?? selections[0];
+    const MONTH_NAMES_LOCAL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const dateTime = primarySel
+      ? `${MONTH_NAMES_LOCAL[primarySel.month]} ${primarySel.day}, ${primarySel.year}${primarySel.time ? ` at ${primarySel.time}` : ''}`
+      : '';
+    return {
+      service: `${(isCustom || selectedPkg === 'Custom') ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]} — ${SIZE_LABELS[selectedSize as SizeKey]}`,
+      dateTime,
+      frequency: frequencyDiscounts[frequency].label,
+      total: isFreeBooking ? 'FREE' : `$${grandTotal.toFixed(2)} CAD`,
+      isFree: isFreeBooking,
+      promoApplied: !!(promoResult?.valid && appliedPromo),
+      email: contactEmail || undefined,
+      // Quote conversion: include mode + reference so BookingSuccess shows quote variant
+      ...(quoteId ? { mode: 'quote' as const, quoteRef: quoteId.slice(0, 12).toUpperCase(), name: contactName || undefined } : {}),
+    };
+  };
+
+  /* ── Paid booking confirmation — called after Stripe succeeds client-side ── */
+  const handlePaymentSuccess = async () => {
+    if (!paymentIntentId) return;
+    setPaymentError(null);
+    try {
+      const res = await fetch('/api/bookings/confirm-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentIntentId }),
+      });
+      if (res.ok) {
+        const confirmData = await res.json() as { bookingId?: string; status?: string };
+
+        // If this was a quote conversion, mark the quote as converted
+        if (quoteId && confirmData.bookingId) {
+          fetch(`/api/quotes/${quoteId}/convert`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ booking_id: confirmData.bookingId }),
+          }).catch(err => console.warn('[quote/convert] failed (non-blocking):', err));
+        }
+
+        clarityEvent('booking_confirmed');
+        tracker.event('booking_checkout_started', { svc: selectedPkg, sz: selectedSize, freq: frequency });
+        navigate('/booking-success', { state: buildSuccessState() });
+      } else {
+        const err = await res.json() as { error?: string };
+        setPaymentError(
+          err.error ??
+          'Your payment was processed but we could not create your booking. Please contact us at hello@example.com',
+        );
+      }
+    } catch {
+      setPaymentError(
+        'Your payment was processed but we encountered an error. Please contact us at hello@example.com',
+      );
+    }
+  };
+
+  /* ── Free booking confirmation ── */
+  const handleFreeBooking = async () => {
+    const primarySelection = selections[0];
+    if (!primarySelection || !primarySelection.time) return;
+    setFreeLoading(true);
+    setFreeError(null);
+    const dateStr = `${primarySelection.year}-${String(primarySelection.month + 1).padStart(2,'0')}-${String(primarySelection.day).padStart(2,'0')}`;
+    const addOnsPayload = applicableAddOns
+      .filter(a => selectedAddOns[a.id]?.on)
+      .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
+    try {
+      const res = await fetch('/api/bookings/confirm-free', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contactName,
+          email: contactEmail,
+          phone: contactPhone,
+          service: selectedPkg,
+          homeSize: selectedSize,
+          date: dateStr,
+          time: primarySelection.time,
+          addOns: addOnsPayload,
+          notes: jobNotes,
+          promoCode: appliedPromo ?? undefined,
+          frequency,
+          serviceAddress: unitNumber ? `${serviceAddress}, Unit ${unitNumber}` : serviceAddress,
+          ...(serviceAddressCoords ? { lat: serviceAddressCoords.lat, lng: serviceAddressCoords.lng } : {}),
+          // Source attribution
+          source: bookingSource,
+          utmSource,
+          utmMedium,
+          utmCampaign,
+          sourceEmailId,
+        }),
+      });
+      if (res.ok) {
+        clarityEvent('booking_confirmed');
+        tracker.event('booking_checkout_started', { svc: selectedPkg, sz: selectedSize, freq: frequency });
+        navigate('/booking-success', { state: buildSuccessState() });
+      } else {
+        const err = await res.json() as { error?: string };
+        setFreeError(err.error ?? 'Could not confirm booking. Please try again.');
+      }
+    } catch {
+      setFreeError('Network error. Please try again.');
+    } finally {
+      setFreeLoading(false);
+    }
+  };
+
+  /* nav helpers */
+  const prevMonth = () => {
+    if (!canGoPrevMonth) return;
+    setDaySlots({});
+    setActiveSlotIndex(null);
+    if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
+    else setCalMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    setDaySlots({});
+    setActiveSlotIndex(null);
+    if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
+    else setCalMonth(m => m + 1);
+  };
+
+  /* day click handler — multi-select toggle */
+  const handleDayClick = (day: number) => {
+    if (!available.has(day)) return;
+
+    if (selectedDays.has(day)) {
+      const newSelections = selections.filter(s => !(s.day === day && s.month === calMonth && s.year === calYear));
+      setSelections(newSelections);
+      setActiveSlotIndex(newSelections.length > 0 ? newSelections.length - 1 : null);
+    } else if (selections.length < maxSlots) {
+      const newSelections = [...selections, { day, month: calMonth, year: calYear, time: null }];
+      setSelections(newSelections);
+      setActiveSlotIndex(newSelections.length - 1);
+    }
+  };
+
+  /* time selection for the active slot */
+  const handleTimeSelect = (slot: AvailabilitySlot) => {
+    if (activeSlotIndex === null) return;
+    setSelections(prev => prev.map((s, i) => i === activeSlotIndex ? { ...s, time: slot.label, endsBy: slot.endsBy } : s));
+  };
+
+  /* frequency change — reset selections */
+  const handleFrequencyChange = (freq: Frequency) => {
+    setFrequency(freq);
+    setSelections([]);
+    setActiveSlotIndex(null);
+  };
+
+  /* Service changes — update state without clearing calendar selections.
+     Frequency changes (handleFrequencyChange) still clear selections as before. */
+  const handlePkgChange = (pkg: Pkg) => {
+    setSelectedPkg(pkg);
+    // Do NOT clear selections — user's calendar picks persist across service changes
+    setDaySlots({});
+  };
+
+  const toggleAddOn = (key: string) => {
+    setSelectedAddOns(prev => {
+      const cur = prev[key];
+      if (!cur || !cur.on) return { ...prev, [key]: { on: true, qty: 1 } };
+      return { ...prev, [key]: { ...cur, on: false } };
+    });
+  };
+  const setAddOnQty = (key: string, qty: number) => {
+    setSelectedAddOns(prev => ({ ...prev, [key]: { on: true, qty: Math.max(1, Math.min(10, qty)) } }));
+  };
+
+  /* ── shared styles ── */
+  const sidebarCard: React.CSSProperties = {
+    background: colors.white,
+    border: `1px solid ${colors.stone}`,
+    borderRadius: '8px',
+    padding: '20px',
+    marginBottom: '16px',
+  };
+  const sidebarLabel: React.CSSProperties = {
+    ...typography.sectionLabel,
+    fontSize: '11px',
+    color: colors.warmGray,
+    marginBottom: '8px',
+  };
+  const sidebarValue: React.CSSProperties = {
+    fontFamily: fonts.body,
+    fontSize: '15px',
+    color: colors.charcoal,
+    fontWeight: 400,
+  };
+
+  const sortedSelections = [...selections].sort((a, b) => (a.year - b.year) || (a.month - b.month) || (a.day - b.day));
+
+  /* ── Active day's time slots ── */
+  const activeDay = activeSlotIndex !== null ? selections[activeSlotIndex]?.day : null;
+  const activeDayApiSlots: AvailabilitySlot[] = activeDay != null ? (daySlots[activeDay] ?? []) : [];
+  const activeDayFallbackSlots = getAvailableSlotsFallback(selectedPkg, selectedSize).map(s => ({
+    hour: s.hour,
+    label: s.label,
+    endsBy: formatCompletionTime(s.label, selectedPkg, selectedSize),
+  }));
+  const activeSlots: AvailabilitySlot[] = activeDayApiSlots.length > 0
+    ? activeDayApiSlots
+    : (activeDay != null && !dayLoading[activeDay] ? activeDayFallbackSlots : []);
+  const isLoadingActiveSlots = activeDay != null && !!dayLoading[activeDay];
+
+  /* ═══════════════════════ RENDER ═══════════════════════ */
+  return (
+    <>
+
+    <div
+      style={{ paddingTop: '54px', background: colors.cream, minHeight: '100vh' }}
+      onDragEnter={isCustom && step === 3 ? (e) => { e.preventDefault(); setIsDragOver(true); } : undefined}
+      onDragOver={isCustom && step === 3 ? (e) => { e.preventDefault(); setIsDragOver(true); } : undefined}
+      onDragLeave={isCustom && step === 3 ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false); } : undefined}
+      onDrop={isCustom && step === 3 ? (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) setPendingDropFiles(files);
+      } : undefined}
+    >
+      {/* ── Drag-drop overlay (custom mode + step 3 only) ── */}
+      {isCustom && step === 3 && isDragOver && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(115,115,115,0.15)',
+          border: `3px dashed ${colors.sageGreen}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            fontSize: '1.5rem',
+            color: colors.sageGreen,
+            fontWeight: 600,
+            fontFamily: fonts.body,
+            background: 'rgba(245,240,232,0.9)',
+            padding: '24px 40px',
+            borderRadius: '12px',
+            border: `2px solid ${colors.sageGreen}`,
+          }}>
+            Drop files to attach to your quote
+          </div>
+        </div>
+      )}
+
+      {/* ── Already converted: quote was already used to book ── */}
+      {quoteAlreadyConverted && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: '40px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>✅</div>
+          <h2 style={{ fontFamily: fonts.display, fontSize: '24px', color: colors.charcoal, marginBottom: '12px' }}>
+            Quote Already Booked
+          </h2>
+          <p style={{ fontFamily: fonts.body, fontSize: '16px', color: colors.warmGray, maxWidth: '400px', marginBottom: '32px', lineHeight: '1.6' }}>
+            This quote has already been converted to a booking. Request a new quote below if needed.
+          </p>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Button variant="primary" onClick={() => { window.location.href = '/book?mode=custom'; }}>
+              Request a New Quote →
+            </Button>
+            <Button variant="outline" onClick={() => { window.location.href = '/'; }}>
+              Go Home
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!quoteAlreadyConverted && (
+        <>
+      <div className="book-outer" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 16px 60px' }}>
+
+        <BookingStepper currentStep={step} />
+
+        <style>{`
+          /* ── Layout ── */
+          .book-layout { display: grid; grid-template-columns: 1fr 300px; gap: 40px; align-items: start; }
+          @media (max-width: 900px) { .book-layout { grid-template-columns: 1fr; } }
+
+          /* ── Frequency grid ── */
+          .book-freq-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+          @media (max-width: 600px) { .book-freq-grid { grid-template-columns: repeat(2, 1fr); } }
+
+          /* ── Sidebar: desktop sticky → hidden on mobile ── */
+          .book-sidebar { position: sticky; top: 66px; }
+          @media (max-width: 900px) { .book-sidebar { display: none; } }
+
+          /* ── Calendar day cells ── */
+          .book-calendar-day {
+            aspect-ratio: 1;
+            display: flex; flex-direction: column;
+            align-items: flex-start; justify-content: flex-start;
+            padding: 10px; font-size: 15px; gap: 4px;
+          }
+          @media (max-width: 768px) {
+            .book-calendar-day { padding: 4px !important; font-size: 12px !important; }
+            .book-cal-slot-label { display: none; }
+          }
+
+          /* ── Time slots: 2-col → 1-col on mobile ── */
+          .book-time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+          @media (max-width: 768px) { .book-time-grid { grid-template-columns: 1fr; } }
+          .book-time-btn { min-height: 44px; }
+
+          /* ── Add-ons: 3-col → 2-col → 1-col ── */
+          .book-addons-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+          @media (max-width: 900px) { .book-addons-grid { grid-template-columns: 1fr 1fr; } }
+          @media (max-width: 480px) { .book-addons-grid { grid-template-columns: 1fr; } }
+
+          /* ── Address + Unit row: stack on mobile ── */
+          .book-address-row { display: flex; gap: 10px; }
+          .book-address-unit { width: 120px; flex-shrink: 0; }
+          @media (max-width: 768px) {
+            .book-address-row { flex-direction: column; gap: 8px; }
+            .book-address-unit { width: 100%; }
+          }
+
+          /* ── Promo apply button: 44px touch target ── */
+          .book-promo-btn { min-height: 44px; }
+
+          /* ── Nav (calendar prev/next) buttons: 44px on mobile ── */
+          .book-nav-btn { min-height: 44px; min-width: 44px; }
+
+          /* ── Frequency option buttons: 44px touch target ── */
+          .book-freq-btn { min-height: 44px; }
+
+          /* ── Overall page padding ── */
+          @media (max-width: 768px) {
+            .book-outer { padding: 0 16px 100px !important; }
+          }
+
+          /* ── Mobile sticky bottom bar (step 2) ── */
+          .book-mobile-bar {
+            display: none;
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #FFFFFF; border-top: 1px solid #E8E2D8;
+            padding: 12px 16px;
+            align-items: center; justify-content: space-between;
+            gap: 12px; z-index: 100;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.08);
+          }
+          @media (max-width: 900px) { .book-mobile-bar { display: flex; } }
+
+          /* ── Mobile inline order summary (step 3) ── */
+          .book-mobile-order-summary { display: none; }
+          @media (max-width: 900px) { .book-mobile-order-summary { display: block; } }
+        `}</style>
+        <div className="book-layout">
+
+          {/* ─── LEFT COLUMN ─── */}
+          <div>
+            {step === 2 && (
+              <>
+                {/* ── SERVICE TYPE SELECTOR ── */}
+                {/* Quote conversion: show locked custom service banner */}
+                {isPrefill && quoteId && (
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(115,115,115,0.08)',
+                    border: '1px solid rgba(115,115,115,0.3)',
+                    borderRadius: '8px',
+                    marginBottom: '24px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                  }}>
+                    <span style={{ fontSize: '20px', flexShrink: 0 }}>🔒</span>
+                    <div>
+                      <div style={{ fontFamily: fonts.body, fontSize: '15px', fontWeight: 500, color: colors.charcoal, marginBottom: '4px' }}>
+                        Custom Quote
+                      </div>
+                      <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, lineHeight: 1.5 }}>
+                        Service and price set by your approved quote.
+                        {promoResult?.valid && promoResult.finalPrice != null && (
+                          <> Your approved total (incl. GST): <strong style={{ color: colors.sageGreen }}>${(promoResult.finalPrice / 100).toFixed(2)}</strong></>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {isCustom && !isPrefill && (
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(115,115,115,0.08)',
+                    border: '1px solid rgba(115,115,115,0.3)',
+                    borderRadius: '8px',
+                    marginBottom: '24px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                  }}>
+                    <span style={{ fontSize: '20px', flexShrink: 0 }}>✨</span>
+                    <div>
+                      <div style={{ fontFamily: fonts.body, fontSize: '15px', fontWeight: 500, color: colors.charcoal, marginBottom: '4px' }}>
+                        Custom Service
+                      </div>
+                      <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, lineHeight: 1.5 }}>
+                        We'll build a personalised quote based on your space and needs.
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!isPrefill && !isCustom && (
+                <div style={{ marginBottom: '24px' }}>
+                  <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '12px' }}>
+                    SERVICE TYPE
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                    {(PKGS as readonly Pkg[]).map(pkg => {
+                      const isSelected = pkg === selectedPkg;
+                      const isExpanded = expandedPkg === pkg;
+                      return (
+                        <div key={pkg} style={{ position: 'relative' }}>
+                          <button
+                            onClick={() => handlePkgChange(pkg)}
+                            style={{
+                              width: '100%',
+                              padding: '14px 12px 14px 12px',
+                              paddingRight: '36px',
+                              background: isSelected ? colors.sageGreen : colors.white,
+                              border: `1px solid ${isSelected ? colors.sageGreen : colors.stone}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              textAlign: 'left' as const,
+                            }}
+                          >
+                            <div style={{
+                              fontFamily: fonts.display,
+                              fontSize: '15px',
+                              fontWeight: 500,
+                              color: isSelected ? '#000000' : colors.charcoal,
+                              marginBottom: '4px',
+                            }}>
+                              {PKG_DISPLAY_NAME[pkg]}
+                            </div>
+                            <div style={{
+                              fontFamily: fonts.body,
+                              fontSize: '12px',
+                              color: isSelected ? '#000000' : colors.sageGreen,
+                            }}>
+                              ${isBusiness ? getBasePriceForMode(pkg, selectedSize, 'business') : PRICES[pkg as Pkg][selectedSize as SizeKey]}
+                            </div>
+                          </button>
+                          {/* Expand/collapse icon — separate from card select */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedPkg(prev => prev === pkg ? null : pkg);
+                            }}
+                            aria-label={isExpanded ? `Collapse ${PKG_DISPLAY_NAME[pkg]} description` : `Expand ${PKG_DISPLAY_NAME[pkg]} description`}
+                            style={{
+                              position: 'absolute',
+                              top: '10px',
+                              right: '8px',
+                              width: '22px',
+                              height: '22px',
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 0,
+                              color: isSelected ? 'rgba(0,0,0,0.65)' : colors.warmGray,
+                              transition: 'color 0.15s ease',
+                            }}
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 14 14"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              style={{
+                                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                transition: 'transform 0.2s ease',
+                              }}
+                            >
+                              <polyline points="2 5 7 10 12 5" />
+                            </svg>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Collapsible description panel */}
+                  <AnimatePresence>
+                    {expandedPkg && (
+                      <motion.div
+                        key={expandedPkg}
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+                        style={{ overflow: 'hidden' }}
+                      >
+                        <div style={{
+                          marginTop: '10px',
+                          padding: '14px 16px',
+                          background: colors.white,
+                          borderRadius: '8px',
+                          border: `1px solid ${colors.stone}`,
+                        }}>
+                          <p style={{
+                            fontFamily: fonts.body,
+                            fontSize: '13px',
+                            color: colors.warmGray,
+                            margin: '0 0 10px 0',
+                            lineHeight: 1.6,
+                          }}>
+                            {SERVICE_DESC[expandedPkg]}
+                          </p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                            {(SERVICE_INCLUDES[expandedPkg] || []).map((item: string) => (
+                              <span key={item} style={{
+                                fontFamily: fonts.body,
+                                fontSize: '11px',
+                                color: colors.charcoal,
+                                background: colors.cream,
+                                padding: '3px 8px',
+                                borderRadius: '16px',
+                                border: `1px solid ${colors.stone}`,
+                              }}>
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                )} {/* end !isPrefill service selector */}
+
+                {/* ── FREQUENCY SELECTOR (residential/business) or SERVICE SELECTOR (custom) ── */}
+                {isCustom && !isPrefill ? (
+                  /* ── SELECT SERVICES — custom mode multi-select ── */
+                  <div style={{ marginBottom: '32px' }}>
+                    <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '16px' }}>
+                      SELECT SERVICES
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {([
+                        'Service type A',
+                        'Service type B',
+                        'Service type C',
+                        'Service type D',
+                        'Custom / Other',
+                      ] as const).map(svc => {
+                        const isActive = customServices.includes(svc);
+                        return (
+                          <button
+                            key={svc}
+                            onClick={() => setCustomServices(prev =>
+                              prev.includes(svc) ? prev.filter(s => s !== svc) : [...prev, svc]
+                            )}
+                            style={{
+                              padding: '12px 18px',
+                              background: isActive ? colors.sageGreen : colors.white,
+                              border: `1px solid ${isActive ? colors.sageGreen : colors.stone}`,
+                              borderRadius: '20px',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              fontFamily: fonts.body,
+                              fontSize: '14px',
+                              fontWeight: isActive ? 500 : 400,
+                              color: isActive ? '#000000' : colors.charcoal,
+                              letterSpacing: '0.01em',
+                            }}
+                          >
+                            {svc}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  /* ── HOW OFTEN? — residential / business / prefill mode ── */
+                  <div style={{ marginBottom: '32px' }}>
+                    <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '16px' }}>
+                      HOW OFTEN?
+                    </div>
+                    <div className="book-freq-grid">
+                      {FREQUENCY_OPTIONS.map(opt => {
+                        const isActive = frequency === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => handleFrequencyChange(opt.value)}
+                            style={{
+                              padding: '16px 12px',
+                              background: isActive ? colors.sageGreen : colors.white,
+                              border: `1px solid ${isActive ? colors.sageGreen : colors.stone}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              textAlign: 'center' as const,
+                            }}
+                          >
+                            <div style={{
+                              fontFamily: fonts.body,
+                              fontSize: '15px',
+                              fontWeight: 500,
+                              color: isActive ? '#000000' : colors.charcoal,
+                              marginBottom: '4px',
+                            }}>
+                              {opt.label}
+                            </div>
+                            <div style={{
+                              fontFamily: fonts.body,
+                              fontSize: '11px',
+                              color: isActive ? '#000000' : colors.warmGray,
+                              lineHeight: 1.3,
+                            }}>
+                              {opt.description}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Calendar header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                  <span style={{ ...typography.sectionLabel, fontSize: '13px', color: colors.warmGray }}>
+                    {MONTH_NAMES[calMonth].toUpperCase()} {calYear}
+                    {monthLoading && <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.6 }}>loading…</span>}
+                  </span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      onClick={prevMonth}
+                      disabled={!canGoPrevMonth}
+                      style={{
+                        ...navBtn,
+                        opacity: canGoPrevMonth ? 1 : 0.35,
+                        cursor: canGoPrevMonth ? 'pointer' : 'not-allowed',
+                      }}
+                      className="book-nav-btn"
+                    >‹</button>
+                    <button onClick={nextMonth} style={navBtn} className="book-nav-btn">›</button>
+                  </div>
+                </div>
+
+                {/* Day headers */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0', marginBottom: '4px' }}>
+                  {DAY_HEADERS.map(d => (
+                    <div key={d} style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, textAlign: 'left', padding: '0 0 8px 8px' }}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Calendar grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+                  {Array.from({ length: firstDay }).map((_, i) => (
+                    <div key={`e${i}`} style={emptyCell} />
+                  ))}
+                  {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const isAvailable = available.has(day);
+                    const isSelected = selectedDays.has(day);
+                    const selIndex = selections.findIndex(s => s.day === day);
+                    const isActiveSlot = activeSlotIndex !== null && selIndex === activeSlotIndex;
+                    const isFull = selections.length >= maxSlots && !isSelected;
+                    const hasTime = selIndex >= 0 && selections[selIndex].time !== null;
+                    const slotCount = isAvailable ? getSlotCountForDay(day) : 0;
+
+                    return (
+                      <div
+                        key={day}
+                        onClick={() => { if (isAvailable && !isFull) handleDayClick(day); }}
+                        className="book-calendar-day"
+                        style={{
+                          fontFamily: fonts.body,
+                          fontWeight: 400,
+                          color: isSelected || isActiveSlot
+                            ? '#000000'
+                            : isAvailable && !isFull
+                              ? colors.creamText
+                              : colors.stone,
+                          background: isSelected || isActiveSlot
+                            ? colors.sageGreen
+                            : isAvailable && !isFull
+                              ? '#1a1a1a'
+                              : '#0a0a0a',
+                          cursor: isAvailable && !isFull ? 'pointer' : 'default',
+                          borderRadius: '4px',
+                          transition: 'background 0.15s ease, border-color 0.15s ease',
+                          border: `1px solid ${isSelected || isActiveSlot
+                            ? colors.sageGreen
+                            : isAvailable && !isFull
+                              ? '#333333'
+                              : colors.stone}`,
+                          gap: '4px',
+                          position: 'relative',
+                        }}
+                      >
+                        <span>{day}</span>
+                        {isAvailable && !isFull && !isSelected && (
+                          <span className="book-cal-slot-label" style={{
+                            fontSize: '9px',
+                            fontWeight: 400,
+                            letterSpacing: '0.02em',
+                            color: colors.sageGreen,
+                            lineHeight: 1.2,
+                          }}>
+                            {slotCount > 0 ? `${slotCount} slot${slotCount !== 1 ? 's' : ''}` : 'avail'}
+                          </span>
+                        )}
+                        {isSelected && (
+                          <span style={{
+                            fontSize: CAL_SELECTED_LABEL_FONT,
+                            fontWeight: 500,
+                            letterSpacing: '0.01em',
+                            color: hasTime ? '#000000' : 'rgba(0,0,0,0.65)',
+                            lineHeight: 1.25,
+                          }}>
+                            {formatCalendarSelectionLabel(selections[selIndex], frequency)}
+                          </span>
+                        )}
+                        {isSelected && selections.length > 1 && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '4px',
+                            right: '4px',
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '50%',
+                            background: hasTime ? '#000000' : 'rgba(0,0,0,0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '9px',
+                            fontWeight: 600,
+                            color: hasTime ? colors.sageGreen : '#000000',
+                          }}>
+                            {selIndex + 1}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* ── SELECTED DAYS CHIPS ── */}
+                {selections.length > 0 && (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '20px' }}>
+                    {sortedSelections.map((sel) => {
+                      const idx = selections.findIndex(s => s.day === sel.day && s.month === sel.month && s.year === sel.year);
+                      const isActive = idx === activeSlotIndex;
+                      return (
+                        <button
+                          key={`${sel.year}-${sel.month}-${sel.day}`}
+                          onClick={() => setActiveSlotIndex(idx)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '8px 14px',
+                            background: isActive ? colors.sageGreen : colors.white,
+                            border: `1px solid ${isActive ? colors.sageGreen : sel.time ? colors.sageLight : colors.gold}`,
+                            borderRadius: '20px',
+                            cursor: 'pointer',
+                            fontFamily: fonts.body,
+                            fontSize: '14px',
+                            color: isActive ? '#000000' : colors.charcoal,
+                            fontWeight: isActive ? 600 : 400,
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <span style={{ textAlign: 'left' as const, lineHeight: 1.3 }}>
+                            {formatCalendarSelectionLabel(sel, frequency)}
+                          </span>
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const newSelections = selections.filter(s => !(s.day === sel.day && s.month === sel.month && s.year === sel.year));
+                              setSelections(newSelections);
+                              setActiveSlotIndex(newSelections.length > 0 ? 0 : null);
+                            }}
+                            style={{
+                              fontSize: '12px',
+                              opacity: 0.5,
+                              marginLeft: '2px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ×
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ── TIME SLOTS ── */}
+                {activeSlotIndex !== null && selections[activeSlotIndex] && (
+                  <div style={{ marginTop: '32px' }}>
+                    <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '16px' }}>
+                      {selections.length > 1
+                        ? `PICK A TIME — ${MONTH_NAMES[calMonth].toUpperCase()} ${selections[activeSlotIndex].day} (SESSION ${activeSlotIndex + 1} OF ${selections.length})`
+                        : `AVAILABLE START TIMES — ${MONTH_NAMES[calMonth].toUpperCase()} ${selections[activeSlotIndex].day}`
+                      }
+                    </div>
+
+                    {isLoadingActiveSlots ? (
+                      <div style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray, padding: '20px 0' }}>Loading available times…</div>
+                    ) : activeSlots.length === 0 ? (
+                      <div style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray, padding: '20px 0' }}>No available times for this day.</div>
+                    ) : (
+                      <div className="book-time-grid">
+                        {activeSlots.map(slot => {
+                          const isSel = slot.label === selections[activeSlotIndex]?.time;
+                          return (
+                            <button
+                              key={slot.label}
+                              onClick={() => handleTimeSelect(slot)}
+                              className="book-time-btn"
+                              style={{
+                                padding: '14px 16px',
+                                fontFamily: fonts.body,
+                                fontSize: '15px',
+                                fontWeight: 400,
+                                color: isSel ? '#000000' : colors.charcoal,
+                                background: isSel ? colors.sageGreen : colors.white,
+                                border: `1px solid ${isSel ? colors.sageGreen : colors.stone}`,
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                letterSpacing: '0.01em',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                              }}
+                            >
+                              <span>{slot.label}</span>
+                              <span style={{ fontSize: '12px', opacity: isSel ? 0.75 : 0.65 }}>done by {slot.endsBy}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {step === 3 && (
+              <>
+                {/* ── CUSTOM QUOTE MODE ── */}
+                {isCustom ? (
+                  <QuoteIntakeForm
+                    name={contactName}
+                    onNameChange={setContactName}
+                    email={contactEmail}
+                    onEmailChange={setContactEmail}
+                    phone={contactPhone}
+                    onPhoneChange={setContactPhone}
+                    serviceAddress={serviceAddress}
+                    onAddressChange={setServiceAddress}
+                    onAddressSelect={(r: AddressResult) => {
+                      setServiceAddress(r.formatted);
+                      setServiceAddressCoords({ lat: r.lat, lng: r.lng });
+                    }}
+                    unitNumber={unitNumber}
+                    onUnitChange={setUnitNumber}
+                    customServices={customServices}
+                    homeSize={selectedSize}
+                    pendingDropFiles={pendingDropFiles}
+                    onDropFilesConsumed={() => setPendingDropFiles([])}
+                    selectedDate={selections[0] ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day}, ${selections[0].year}` : undefined}
+                    selectedTime={selections[0]?.time ?? undefined}
+                    onSuccess={({ email: e, name: n }) => {
+                      const primarySel = selections[0];
+                      const quoteDateTime = primarySel
+                        ? `${MONTH_NAMES[primarySel.month]} ${primarySel.day}, ${primarySel.year}${primarySel.time ? ` at ${primarySel.time}` : ''}`
+                        : '';
+                      navigate('/booking-success', {
+                        state: { mode: 'quote', email: e, name: n, service: 'Custom Quote', dateTime: quoteDateTime, frequency: '', total: 'Quote Requested', isFree: false },
+                      });
+                    }}
+                  />
+                ) : (
+                  <>
+                {/* ── Mobile inline order summary (step 3, ≤900px) ── */}
+                <div className="book-mobile-order-summary">
+                  <div style={{ background: colors.white, border: `1px solid ${colors.stone}`, borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+                    <div style={{ ...typography.sectionLabel, fontSize: '11px', color: colors.warmGray, marginBottom: '10px' }}>ORDER SUMMARY</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal }}>{(isCustom || selectedPkg === 'Custom') ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness && !isCustom && selectedPkg !== 'Custom' ? ' (Business)' : ''}</span>
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', fontWeight: 500, color: colors.charcoal }}>${basePrice}</span>
+                    </div>
+                    {sortedSelections[0] && (
+                      <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginBottom: '4px' }}>
+                        {MONTH_NAMES[sortedSelections[0].month]} {sortedSelections[0].day}{sortedSelections[0].time ? ` at ${sortedSelections[0].time}` : ''}
+                      </div>
+                    )}
+                    {addOnTotal > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>Add-ons</span>
+                        <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>+${addOnTotal}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '8px', borderTop: `1px solid ${colors.stone}`, marginTop: '4px' }}>
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', fontWeight: 500, color: colors.charcoal }}>Total (incl. GST)</span>
+                      <span style={{ fontFamily: fonts.body, fontSize: '15px', fontWeight: 500, color: isFreeBooking ? colors.sageGreen : colors.charcoal }}>
+                        {isFreeBooking ? 'FREE' : `$${grandTotal.toFixed(2)}`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* YOUR INFO */}
+                <div style={{ ...typography.sectionLabel, fontSize: '12px', marginBottom: '16px' }}>YOUR INFO</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '32px' }}>
+
+                  {/* Business Name + Property Type (business mode only) */}
+                  {isBusiness && (
+                    <>
+                      <div>
+                        <input
+                          placeholder="Business Name"
+                          value={businessName}
+                          onChange={e => {
+                            setBusinessName(e.target.value);
+                            if (businessNameError) setBusinessNameError(e.target.value.trim() ? '' : 'Business name is required');
+                            if (intentError) setIntentError(null);
+                          }}
+                          onBlur={e => setBusinessNameError(e.target.value.trim() ? '' : 'Business name is required')}
+                          style={{ ...inputStyle, borderColor: businessNameError ? '#df1b41' : undefined }}
+                        />
+                        {businessNameError && <div style={fieldError}>{businessNameError}</div>}
+                      </div>
+                      <div>
+                        <select
+                          value={propertyType}
+                          onChange={e => { setPropertyType(e.target.value); if (intentError) setIntentError(null); }}
+                          style={{
+                            ...inputStyle,
+                            appearance: 'none' as const,
+                            WebkitAppearance: 'none' as const,
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
+                            backgroundRepeat: 'no-repeat',
+                            backgroundPosition: 'right 14px center',
+                            paddingRight: '36px',
+                            color: propertyType ? undefined : '#9B958C',
+                          }}
+                        >
+                          <option value="" disabled>Property Type</option>
+                          {site.booking.checkout.propertyTypes.map(type => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Full Name */}
+                  <div>
+                    <input
+                      placeholder="Full Name"
+                      value={contactName}
+                      onChange={e => {
+                        // Auto-capitalize each word
+                        const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
+                        setContactName(val);
+                        if (nameError) setNameError(validateName(val));
+                        if (intentError) setIntentError(null);
+                      }}
+                      onBlur={e => setNameError(validateName(e.target.value))}
+                      style={{ ...inputStyle, borderColor: nameError ? '#df1b41' : undefined }}
+                    />
+                    {nameError && <div style={fieldError}>{nameError}</div>}
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <input
+                      placeholder="Email"
+                      type="email"
+                      value={contactEmail}
+                      onChange={e => { setContactEmail(e.target.value); if (emailError) setEmailError(validateEmail(e.target.value)); if (intentError) setIntentError(null); }}
+                      onBlur={e => setEmailError(validateEmail(e.target.value))}
+                      style={{ ...inputStyle, borderColor: emailError ? '#df1b41' : undefined }}
+                    />
+                    {emailError && <div style={fieldError}>{emailError}</div>}
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <input
+                      placeholder="+1 (XXX) XXX-XXXX"
+                      type="tel"
+                      value={contactPhone}
+                      onChange={e => {
+                        const formatted = formatPhoneNumber(e.target.value);
+                        setContactPhone(formatted);
+                        if (phoneError) setPhoneError(validatePhone(formatted));
+                        if (intentError) setIntentError(null);
+                      }}
+                      onBlur={e => setPhoneError(validatePhone(e.target.value))}
+                      style={{ ...inputStyle, borderColor: phoneError ? '#df1b41' : undefined }}
+                    />
+                    {phoneError && <div style={fieldError}>{phoneError}</div>}
+                  </div>
+
+                  {/* Address row: autocomplete + unit number */}
+                  <div className="book-address-row">
+                    <div style={{ flex: 1 }}>
+                      <AddressAutocomplete
+                        placeholder={site.booking.checkout.addressPlaceholder}
+                        value={serviceAddress}
+                        onChange={setServiceAddress}
+                        onSelect={(r: AddressResult) => { setServiceAddress(r.formatted); setServiceAddressCoords({ lat: r.lat, lng: r.lng }); }}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div className="book-address-unit">
+                      <input
+                        placeholder="Unit # (opt.)"
+                        value={unitNumber}
+                        onChange={e => setUnitNumber(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* ADD-ONS */}
+                <div style={{ ...typography.sectionLabel, fontSize: '12px', marginBottom: '16px' }}>ADD-ONS</div>
+                <div>
+                  <div className="book-addons-grid">
+                    {applicableAddOns.map(a => {
+                      const state = selectedAddOns[a.id];
+                      const isOn = state?.on;
+                      const qty = state?.qty || 1;
+                      const hasQty = !!a.unit;
+                      const isExpanded = expandedAddOn === a.id;
+                      return (
+                        <div
+                          key={a.id}
+                          style={{
+                            border: `1px solid ${isOn || isExpanded ? colors.sageGreen : colors.stone}`,
+                            borderRadius: '6px',
+                            background: isOn ? 'rgba(115,115,115,0.08)' : colors.white,
+                            transition: 'border-color 0.15s ease, background 0.15s ease',
+                          }}
+                        >
+                          <div
+                            onClick={() => !hasQty && toggleAddOn(a.id)}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              padding: '10px 12px',
+                              cursor: hasQty ? 'default' : 'pointer',
+                              gap: `${ADDON_CARD_GAP}px`,
+                              minHeight: '56px',
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: ADDON_ICON_SIZE + ADDON_ICON_PADDING * 2,
+                                height: ADDON_ICON_SIZE + ADDON_ICON_PADDING * 2,
+                                padding: ADDON_ICON_PADDING,
+                                flexShrink: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {ADDON_ICONS[a.id]}
+                            </span>
+
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                flexWrap: 'nowrap',
+                              }}>
+                                <span style={{
+                                  fontFamily: fonts.body,
+                                  fontSize: '12px',
+                                  color: colors.charcoal,
+                                  fontWeight: isOn ? 500 : 400,
+                                  lineHeight: 1.3,
+                                }}>
+                                  {a.label}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedAddOn(prev => prev === a.id ? null : a.id);
+                                  }}
+                                  aria-label={isExpanded ? `Hide ${a.label} details` : `Show ${a.label} details`}
+                                  aria-expanded={isExpanded}
+                                  style={{
+                                    flexShrink: 0,
+                                    width: '16px',
+                                    height: '16px',
+                                    padding: 0,
+                                    border: 'none',
+                                    background: 'transparent',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: isExpanded ? colors.sageGreen : colors.warmGray,
+                                    transition: 'color 0.15s ease',
+                                  }}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                    <circle cx="7" cy="7" r="6.25" stroke="currentColor" strokeWidth="1.25" />
+                                    <circle cx="7" cy="4.25" r="0.85" fill="currentColor" stroke="none" />
+                                    <line x1="7" y1="6.25" x2="7" y2="10" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+                                  </svg>
+                                </button>
+                              </div>
+                              <div style={{ fontFamily: fonts.body, fontSize: '11px', color: colors.warmGray, marginTop: '2px' }}>
+                                +${hasQty && isOn ? a.price * qty : a.price}{a.unit ? `/${a.unit}` : ''}
+                              </div>
+                            </div>
+
+                            {hasQty ? (
+                              <div
+                                style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <button
+                                  onClick={e => { e.stopPropagation(); if (!isOn) { toggleAddOn(a.id); } else if (qty <= 1) { toggleAddOn(a.id); } else { setAddOnQty(a.id, qty - 1); } }}
+                                  style={{ ...inlineQtyBtn, opacity: 1 }}
+                                >−</button>
+                                <span style={{ fontFamily: fonts.body, fontSize: '12px', color: isOn ? colors.charcoal : colors.warmGray, minWidth: '14px', textAlign: 'center' }}>
+                                  {isOn ? qty : 0}
+                                </span>
+                                <button
+                                  onClick={e => { e.stopPropagation(); if (!isOn) { toggleAddOn(a.id); } else { setAddOnQty(a.id, qty + 1); } }}
+                                  style={inlineQtyBtn}
+                                >+</button>
+                              </div>
+                            ) : isOn ? (
+                              <svg width="16" height="16" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+                                <circle cx="7" cy="7" r="7" fill={colors.sageGreen}/>
+                                <path d="M4 7l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <AnimatePresence initial={false}>
+                    {expandedAddOn && (() => {
+                      const expanded = applicableAddOns.find(a => a.id === expandedAddOn);
+                      if (!expanded) return null;
+                      return (
+                        <motion.div
+                          key={expandedAddOn}
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+                          style={{ overflow: 'hidden' }}
+                        >
+                          <div style={{
+                            marginTop: '10px',
+                            padding: '14px 16px',
+                            background: colors.white,
+                            borderRadius: '8px',
+                            border: `1px solid ${colors.stone}`,
+                          }}>
+                            <p style={{
+                              fontFamily: fonts.body,
+                              fontSize: '13px',
+                              color: colors.warmGray,
+                              margin: 0,
+                              lineHeight: 1.6,
+                              maxWidth: '72ch',
+                            }}>
+                              {expanded.description}
+                            </p>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
+                  </AnimatePresence>
+                </div>
+
+                {/* JOB NOTES */}
+                <div style={{ marginTop: '24px' }}>
+                  <div style={{ ...typography.sectionLabel, fontSize: '12px', marginBottom: '12px' }}>{site.booking.checkout.notesLabel}</div>
+                  <div style={{ position: 'relative' }}>
+                    <textarea
+                      placeholder={site.booking.checkout.notesPlaceholder}
+                      value={jobNotes}
+                      onChange={e => setJobNotes(e.target.value.slice(0, 120))}
+                      style={{ ...textareaStyle, paddingBottom: '28px', width: '100%', resize: 'none' }}
+                    />
+                    <div style={{
+                      position: 'absolute', bottom: '8px', right: '12px',
+                      fontFamily: fonts.body, fontSize: '11px',
+                      color: jobNotes.length >= 110 ? colors.gold : colors.warmGray,
+                      opacity: 0.8,
+                    }}>
+                      {jobNotes.length}/120
+                    </div>
+                  </div>
+                </div>
+
+                {/* PROMO CODE */}
+                <div style={{ ...typography.sectionLabel, fontSize: '12px', marginBottom: '12px' }}>PROMO CODE</div>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    placeholder="Enter promo code"
+                    value={promoCode}
+                    onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoResult(null); setAppliedPromo(null); }}
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button
+                    onClick={handlePromoValidate}
+                    disabled={promoLoading || !promoCode.trim()}
+                    className="book-promo-btn"
+                    style={{
+                      padding: '14px 20px',
+                      background: promoLoading || !promoCode.trim() ? colors.stone : colors.sageGreen,
+                      color: promoLoading || !promoCode.trim() ? colors.warmGray : colors.cream,
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontFamily: fonts.body,
+                      fontSize: '14px',
+                      cursor: promoLoading || !promoCode.trim() ? 'not-allowed' : 'pointer',
+                      transition: 'background 0.2s ease',
+                      whiteSpace: 'normal' as const,
+                    }}
+                  >
+                    {promoLoading ? 'Checking…' : 'Apply'}
+                  </button>
+                </div>
+                {promoResult && (
+                  <div style={{
+                    padding: '10px 14px',
+                    background: promoResult.valid ? 'rgba(115,115,115,0.08)' : 'rgba(223,27,65,0.06)',
+                    border: `1px solid ${promoResult.valid ? colors.sageLight : 'rgba(223,27,65,0.3)'}`,
+                    borderRadius: '6px',
+                    fontFamily: fonts.body,
+                    fontSize: '13px',
+                    color: promoResult.valid ? colors.sageGreen : '#df1b41',
+                    marginBottom: '24px',
+                  }}>
+                    {promoResult.valid
+                      ? `✓ ${promoResult.description ?? 'Promo applied!'}`
+                      : `✗ ${promoResult.reason ?? 'Invalid code'}`
+                    }
+                  </div>
+                )}
+
+                {/* PAYMENT section label */}
+                <div style={{ ...typography.sectionLabel, fontSize: '12px', marginBottom: '12px', marginTop: '8px' }}>PAYMENT</div>
+
+                {/* Error from create-intent */}
+                {intentError && (
+                  <div role="alert" style={{
+                    padding: '12px 16px',
+                    background: 'rgba(223,27,65,0.06)',
+                    border: '1px solid rgba(223,27,65,0.3)',
+                    borderRadius: '6px',
+                    fontFamily: fonts.body,
+                    fontSize: '14px',
+                    color: '#df1b41',
+                    marginBottom: '20px',
+                  }}>
+                    {intentError}
+                  </div>
+                )}
+
+                {/* $0 free booking flow */}
+                {isFreeBooking && clientSecret === null && (
+                  <div style={{
+                    background: 'rgba(115,115,115,0.08)',
+                    border: `1px solid ${colors.sageLight}`,
+                    borderRadius: '8px',
+                    padding: '24px',
+                    marginBottom: '32px',
+                    textAlign: 'center' as const,
+                  }}>
+                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎉</div>
+                    <div style={{ fontFamily: fonts.body, fontSize: '16px', color: colors.charcoal, fontWeight: 500, marginBottom: '4px' }}>
+                      Your promo covers this booking!
+                    </div>
+                    <div style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray, marginBottom: '20px' }}>
+                      No payment required.
+                    </div>
+                    {freeError && (
+                      <div style={{ color: '#df1b41', fontFamily: fonts.body, fontSize: '14px', marginBottom: '12px' }}>{freeError}</div>
+                    )}
+                    <Button variant="primary" fullWidth onClick={handleFreeBooking}>
+                      {freeLoading ? 'Confirming…' : 'Confirm Free Booking'}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Stripe Payment Element — only when clientSecret present */}
+                {!isFreeBooking && clientSecret && (
+                  <div style={{
+                    background: colors.white,
+                    border: `1px solid ${colors.stone}`,
+                    borderRadius: '8px',
+                    padding: '24px',
+                    marginBottom: '32px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+                      <svg width="38" height="16" viewBox="0 0 38 16" fill="none">
+                        <rect width="38" height="16" rx="3" fill="#635BFF"/>
+                        <text x="4" y="12" fill="white" fontSize="9" fontFamily="sans-serif">stripe</text>
+                      </svg>
+                      <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>Secured by Stripe</span>
+                    </div>
+
+                    {(hasStripeKey || publishableKey) ? (
+                    <Elements
+                      stripe={elementsStripe}
+                      options={{
+                        clientSecret,
+                        ...(customerSessionClientSecret ? { customerSessionClientSecret } : {}),
+                        appearance: STRIPE_APPEARANCE,
+                      }}
+                    >
+                      <PaymentForm
+                        returnUrl={window.location.origin + '/book/confirmation'}
+                        total={grandTotal}
+                        frequencyLabel={frequencyDiscounts[frequency].label}
+                        onSuccess={() => {
+                          handlePaymentSuccess();
+                        }}
+                        onError={(msg) => {
+                          setIntentError(msg);
+                        }}
+                      />
+                    </Elements>
+                    ) : (
+                      <p style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray, lineHeight: 1.6, margin: 0 }}>
+                        Stripe is not configured for local preview. Copy <code>.env.example</code> to <code>.env</code> and set <code>VITE_STRIPE_PUBLISHABLE_KEY</code> to enable the payment form.
+                      </p>
+                    )}
+                    {paymentError && (
+                      <div style={{
+                        background: '#fff0f0',
+                        border: '1px solid #ffcccc',
+                        borderRadius: '6px',
+                        padding: '12px 16px',
+                        marginTop: '16px',
+                        fontFamily: 'inherit',
+                        fontSize: '14px',
+                        color: '#c0392b',
+                        lineHeight: 1.5,
+                      }}>
+                        {paymentError}
+                      </div>
+                    )}
+
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginTop: '16px', cursor: 'pointer', paddingTop: '16px', borderTop: '1px solid ' + colors.stone }}>
+                      <input
+                        type="checkbox"
+                        checked={billingSameAsService}
+                        onChange={e => setBillingSameAsService(e.target.checked)}
+                        style={{ marginTop: '3px', accentColor: colors.sageGreen, width: '16px', height: '16px', flexShrink: 0 }}
+                      />
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal, lineHeight: 1.5 }}>
+                        {site.booking.checkout.billingSameLabel}
+                      </span>
+                    </label>
+                    {!billingSameAsService && (
+                      <AddressAutocomplete
+                        placeholder="Billing Address"
+                        value={billingAddress}
+                        onChange={setBillingAddress}
+                        onSelect={(r: AddressResult) => { setBillingAddress(r.formatted); }}
+                        style={{ ...inputStyle, marginTop: '12px' }}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* Payment loading state */}
+                {!isFreeBooking && !clientSecret && !paymentIntentId && (
+                  <div style={{
+                    background: colors.white,
+                    border: `1px solid ${colors.stone}`,
+                    borderRadius: '8px',
+                    padding: '32px 24px',
+                    marginBottom: '32px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}>
+                    {intentLoading ? (
+                      <>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
+                          <circle cx="12" cy="12" r="10" stroke={colors.stone} strokeWidth="3"/>
+                          <path d="M12 2a10 10 0 0 1 10 10" stroke={colors.sageGreen} strokeWidth="3" strokeLinecap="round"/>
+                        </svg>
+                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                        <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>Loading payment form…</span>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
+                          {(!validateName(contactName) && !validateEmail(contactEmail) && !validatePhone(contactPhone) && serviceAddress)
+                            ? 'Preparing payment…'
+                            : 'Complete your info above to load payment.'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <p style={{
+                  fontFamily: fonts.body,
+                  fontSize: '11px',
+                  color: colors.warmGray,
+                  lineHeight: 1.6,
+                  marginTop: '16px',
+                  maxWidth: 'none',
+                  textAlign: 'center' as const,
+                }}>
+                  {site.booking.checkout.termsAcknowledgment}
+                </p>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ─── RIGHT SIDEBAR (desktop only, hidden on ≤900px) ─── */}
+          <div className="book-sidebar">
+            <div style={{ ...typography.sectionLabel, fontSize: '11px', marginBottom: '16px' }}>
+              {step === 2 ? 'YOUR BOOKING' : 'ORDER SUMMARY'}
+            </div>
+
+            {/* Service card */}
+            <div style={sidebarCard}>
+              <div style={sidebarLabel}>SERVICE</div>
+              <div style={{ ...sidebarValue, fontWeight: 500 }}>
+                {(isPrefill && quoteId) || isCustom || selectedPkg === 'Custom' ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness && !isPrefill && !isCustom && selectedPkg !== 'Custom' ? ' (Business)' : ''}
+              </div>
+              {!isPrefill && !isCustom && (
+              <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '2px' }}>
+                ${basePrice} per visit
+              </div>
+              )}
+              {isCustom && (
+              <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {customServices.length > 0
+                  ? customServices.map(s => (
+                      <span key={s} style={{
+                        fontFamily: fonts.body,
+                        fontSize: '12px',
+                        color: colors.sageGreen,
+                        background: 'rgba(115,115,115,0.1)',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(115,115,115,0.25)',
+                      }}>{s}</span>
+                    ))
+                  : <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>Select services above</span>
+                }
+              </div>
+              )}
+              {isPrefill && promoResult?.valid && promoResult.finalPrice != null && (
+              <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.sageGreen, marginTop: '2px', fontWeight: 500 }}>
+                Approved: ${(promoResult.finalPrice / 100).toFixed(2)} (incl. GST)
+              </div>
+              )}
+              <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '8px', lineHeight: 1.5, fontStyle: 'italic' }}>
+                {isCustom || selectedPkg === 'Custom' ? site.booking.checkout.customQuoteSidebar : SERVICE_DESC[selectedPkg]}
+              </div>
+              {step === 3 && (
+                <div style={{ marginTop: '10px', borderTop: `1px solid ${colors.stone}`, paddingTop: '10px' }}>
+                  <div style={{ fontFamily: fonts.body, fontWeight: 500, fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: colors.warmGray, marginBottom: '6px' }}>
+                    INCLUDED
+                  </div>
+                  {(SERVICE_INCLUDES[selectedPkg] || []).map((item, idx) => (
+                    <div key={idx} style={{ fontFamily: fonts.body, fontSize: '12px', color: colors.charcoal, display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '4px', lineHeight: 1.4 }}>
+                      <span style={{ color: colors.sageGreen, fontSize: '10px', marginTop: '3px', flexShrink: 0 }}>✓</span>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Frequency card — hidden in custom mode */}
+            {!isCustom && (
+            <div style={sidebarCard}>
+              <div style={sidebarLabel}>FREQUENCY</div>
+              <div style={{ ...sidebarValue, fontWeight: 500 }}>{frequencyDiscounts[frequency].label}</div>
+              {discountInfo.discount > 0 && (
+                <div style={{
+                  display: 'inline-block',
+                  marginTop: '6px',
+                  padding: '3px 8px',
+                  background: 'rgba(115,115,115,0.1)',
+                  borderRadius: '4px',
+                  fontFamily: fonts.body,
+                  fontSize: '12px',
+                  color: colors.sageGreen,
+                  fontWeight: 500,
+                }}>
+                  {discountInfo.description}
+                </div>
+              )}
+            </div>
+            )}
+
+            {/* Schedule card */}
+            <div style={sidebarCard}>
+              <div style={sidebarLabel}>
+                {selections.length <= 1 ? 'DATE & TIME' : `SCHEDULED SESSIONS (${selections.length}/${maxSlots})`}
+              </div>
+              {selections.length === 0 ? (
+                <div style={{ ...sidebarValue, color: colors.warmGray }}>—</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {sortedSelections.map((sel, i) => (
+                    <div key={`${sel.year}-${sel.month}-${sel.day}`} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: selections.length > 1 ? '6px 0' : '0',
+                      borderBottom: selections.length > 1 && i < sortedSelections.length - 1 ? `1px solid ${colors.stone}` : 'none',
+                    }}>
+                      <div>
+                        <div style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal, lineHeight: 1.35 }}>
+                          {formatCalendarSelectionLabel(sel, frequency)}
+                        </div>
+                        {sel.time && sel.endsBy && (
+                          <div style={{ fontFamily: fonts.body, fontSize: '12px', color: colors.sageGreen, marginTop: '2px' }}>
+                            done by {sel.endsBy ?? formatCompletionTime(sel.time, selectedPkg, selectedSize)}
+                          </div>
+                        )}
+                      </div>
+                      {sel.time ? (
+                        <span style={{ color: colors.sageGreen, fontSize: '12px' }}>✓</span>
+                      ) : (
+                        <span style={{ color: colors.gold, fontSize: '11px', fontFamily: fonts.body }}>needs time</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Add-ons summary on checkout step */}
+            {step === 3 && addOnTotal > 0 && (
+              <div style={sidebarCard}>
+                <div style={sidebarLabel}>ADD-ONS</div>
+                {applicableAddOns.filter(a => selectedAddOns[a.id]?.on).map(a => {
+                  const st = selectedAddOns[a.id];
+                  return (
+                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal }}>
+                        {a.label}{a.unit && st ? ` × ${st.qty}` : ''}
+                      </span>
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
+                        ${a.price * (a.unit && st ? st.qty : 1)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Cancellation policy on checkout */}
+            {step === 3 && (
+              <div style={sidebarCard}>
+                <div style={sidebarLabel}>CANCELLATION POLICY</div>
+                <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, lineHeight: 1.5 }}>
+                  {site.booking.checkout.cancellationPolicy}
+                </div>
+              </div>
+            )}
+
+            {/* Pricing breakdown on checkout — hidden in custom mode */}
+            {step === 3 && !isCustom && (
+              <div style={{ borderTop: `1px solid ${colors.stone}`, marginTop: '8px', paddingTop: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
+                    {quotePriceOverrideDollars != null ? 'Subtotal' : (frequency === 'one-time' ? 'Subtotal' : `Per visit`)}
+                  </span>
+                  <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>${(quotePriceOverrideDollars != null ? subtotalAfterAllDiscounts : perCleanSubtotal).toFixed(2)}</span>
+                </div>
+                {discountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.sageGreen }}>
+                      {frequencyDiscounts[frequency].label} discount
+                    </span>
+                    <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.sageGreen }}>−${discountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+                {promoDiscountAmount > 0 && quotePriceOverrideDollars == null && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.sageGreen }}>Promo ({appliedPromo})</span>
+                    <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.sageGreen }}>−${promoDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>GST (5%)</span>
+                  <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
+                    ${gstAmount.toFixed(2)}
+                  </span>
+                </div>
+                {frequency !== 'one-time' && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingTop: '8px', borderTop: `1px solid ${colors.stone}` }}>
+                    <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>
+                      {totalCleans} visit{totalCleans !== 1 ? 's' : ''} this month
+                    </span>
+                    <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>
+                      ${perCleanTotal.toFixed(2)} each
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '12px', borderTop: `1px solid ${colors.stone}` }}>
+                  <span style={{ fontFamily: fonts.body, fontSize: '16px', fontWeight: 500, color: colors.charcoal }}>
+                    {frequency === 'one-time' ? 'Total' : 'Total this month'}
+                  </span>
+                  <span style={{ fontFamily: fonts.body, fontSize: '18px', fontWeight: 500, color: isFreeBooking ? colors.sageGreen : colors.charcoal }}>
+                    {isFreeBooking ? 'FREE' : `$${grandTotal.toFixed(2)}`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Continue button on schedule step */}
+            {step === 2 && (
+              <div style={{ marginTop: '16px' }}>
+                <Button
+                  variant="primary"
+                  fullWidth
+                  size="large"
+                  disabled={!canProceedToCheckout}
+                  onClick={attemptContinueToStep3}
+                >
+                  {isCustom ? 'Continue to Quote Form →' : 'Continue to Checkout →'}
+                </Button>
+              </div>
+            )}
+
+
+          </div>
+        </div>
+      </div>
+
+      {/* ── Mobile sticky bottom bar (step 2, ≤900px) ── */}
+      {step === 2 && (
+        <div className="book-mobile-bar">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: fonts.body, fontSize: '14px', fontWeight: 500, color: colors.charcoal, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {(isCustom || selectedPkg === 'Custom') ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness && !isCustom && selectedPkg !== 'Custom' ? ' (Business)' : ''}
+            </div>
+            <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '2px' }}>
+              {isCustom
+                ? (scheduleComplete && selections[0]?.time
+                    ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day} · ${selections[0].time}`
+                    : 'Custom Quote')
+                : (scheduleComplete && selections[0]?.time
+                    ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day} · ${selections[0].time} · $${grandTotal.toFixed(2)}`
+                    : `$${basePrice} per visit`)
+              }
+            </div>
+          </div>
+          <div style={{ flexShrink: 0 }}>
+            <Button
+              variant="primary"
+              size="default"
+              disabled={!canProceedToCheckout}
+              onClick={attemptContinueToStep3}
+            >
+              {isCustom ? 'Quote Form →' : 'Continue →'}
+            </Button>
+          </div>
+        </div>
+      )}
+        </>
+      )}
+    </div>
+
+      {/* Cloudflare Turnstile — invisible bot protection */}
+      <div ref={turnstileRef} style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', opacity: 0, pointerEvents: 'none', top: 0, left: 0 }} aria-hidden="true" />
+    </>
+  );
+}

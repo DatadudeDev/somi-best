@@ -1,0 +1,46 @@
+# wrangler.toml — Cloudflare Pages bindings for the somi-full-template website.
+# Per-client deploys override [vars] + secrets in the Pages dashboard; the only
+# code-level binding that must point at a real resource is the D1 database.
+
+name = "somi-full-template"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 — booking/payments schema (customers, bookings, promo_codes, blocked_dates,
+# settings, transactions). Dev DB "somi-full-template"; per-client deploys swap
+# this id for the tenant's somi-db-{ulid}.
+[[d1_databases]]
+binding = "DB"
+database_name = "somi-full-template"
+database_id = "0b75bb49-7d36-4470-80c2-e847b6d39dfb"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "templatefiles"
+
+# ── Environment variables (per-client; defaults below, override in dashboard) ──
+# CURRENCY              Stripe + ledger currency (default "usd")
+# TIMEZONE              IANA tz for availability math (default "America/Denver")
+# BUSINESS_NAME         Public business name shown in emails
+# BUSINESS_NOTIFY_EMAIL Inbox that receives the new-booking notice
+# REPLY_TO_EMAIL        Reply-To on outbound email
+# FROM_EMAIL            Verified Resend From address (default bookings@send.somi.ceo)
+[vars]
+ENVIRONMENT = "production"
+CURRENCY = "usd"
+TIMEZONE = "America/Denver"
+FROM_EMAIL = "bookings@send.somi.ceo"
+# BUSINESS_NAME = "Acme Home Services"
+# BUSINESS_NOTIFY_EMAIL = "bookings@client.com"
+# REPLY_TO_EMAIL = "hello@client.com"
+
+# ── Secrets — set via `wrangler pages secret put <NAME>` (never commit) ──
+#   STRIPE_SECRET_KEY                Stripe API key (sk_test_… / sk_live_…)
+#   STRIPE_WEBHOOK_SIGNING_SECRET    Stripe webhook signing secret (whsec_…)
+#   RESEND_API_KEY                   Resend API key for inline emails
+#   TURNSTILE_SECRET_KEY             Optional — enables booking bot verification
+# Frontend build var (set at build time, baked into the bundle):
+#   VITE_STRIPE_PUBLISHABLE_KEY      Stripe publishable key (pk_test_… / pk_live_…)
+#   VITE_USE_BOOKING_API=true        Switches the booking form off mock data

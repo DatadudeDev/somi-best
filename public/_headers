@@ -1,0 +1,10 @@
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-XSS-Protection: 0
+  Permissions-Policy: camera=(), microphone=(self), geolocation=(self), payment=(self "https://js.stripe.com")
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Resource-Policy: same-site
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-f5FFloMnHqLkUMGIfJKeiSq9ih/cFd37zE801iSAf/k=' 'sha256-ontWmvgU3Ug7O/J9aUM5kQIxG0aXEX/nqKyyunQ1VNI=' 'sha256-c1ORpUovgUHhmIKUPGclyUcK+g/MtE4RCdiK9kYCPFk=' https://js.stripe.com https://maps.googleapis.com https://maps.gstatic.com https://maps.google.com https://static.cloudflareinsights.com https://www.clarity.ms https://*.clarity.ms https://analytics.ahrefs.com https://cdn.jsdelivr.net https://analytics.datadude.dev https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://maps.googleapis.com https://api.mapbox.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://maps.googleapis.com https://maps.gstatic.com https://maps.google.com https://streetviewpixels-pa.googleapis.com https://*.stripe.com https://www.clarity.ms https://*.clarity.ms https://c.bing.com https://*.mapbox.com; media-src 'self' blob:; frame-src https://js.stripe.com https://hooks.stripe.com https://challenges.cloudflare.com; connect-src 'self' https://api.stripe.com https://*.stripe.com https://m.stripe.com https://m.stripe.network https://q.stripe.com https://maps.googleapis.com https://*.googleapis.com https://*.cloudflareinsights.com https://cloudflareinsights.com https://api.mapbox.com https://events.mapbox.com https://www.clarity.ms https://*.clarity.ms https://c.bing.com https://analytics.ahrefs.com https://analytics.datadude.dev https://auto.datadude.dev; worker-src 'self' blob:; object-src 'none'; base-uri 'self';
