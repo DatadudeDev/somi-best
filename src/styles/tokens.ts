@@ -148,29 +148,31 @@ export type HeroSlideEffect =
   | 'zoom-pan-down'
   | 'zoom-out-pan-right';
 
+const HERO = '/images/best/hero';
+
 export const heroSlides = [
   {
-    src: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=1920&q=80',
+    src: `${HERO}/hero-01-athlete-training.jpg`,
     alt: 'Athlete training intensely',
     effect: 'zoom-pan-left' as HeroSlideEffect,
   },
   {
-    src: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=1920&q=80',
+    src: `${HERO}/hero-02-gym.jpg`,
     alt: 'Gym recovery environment',
     effect: 'zoom-pan-right' as HeroSlideEffect,
   },
   {
-    src: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1920&q=80',
+    src: `${HERO}/hero-03-weight-room.jpg`,
     alt: 'Weight room athlete',
     effect: 'zoom-pan-up' as HeroSlideEffect,
   },
   {
-    src: 'https://images.unsplash.com/photo-1599058945522-28d584b6f82f?auto=format&fit=crop&w=1920&q=80',
+    src: `${HERO}/hero-04-sports-therapy.jpg`,
     alt: 'Sports therapy session',
     effect: 'zoom-pan-down' as HeroSlideEffect,
   },
   {
-    src: 'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?auto=format&fit=crop&w=1920&q=80',
+    src: `${HERO}/hero-05-stretching.jpg`,
     alt: 'Athlete stretching recovery',
     effect: 'zoom-out-pan-right' as HeroSlideEffect,
   },
@@ -189,7 +191,7 @@ export const images = {
   logoDarkMode: '/images/best/logo-wordmark.png',
   logoLightMode: '/images/best/logo-wordmark.png',
   livingRoom: '/images/best/logo-mark.png',
-  contactHero: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=1920&q=80',
-  businessHero: 'https://images.unsplash.com/photo-1517649763962-0c62306601b7?auto=format&fit=crop&w=1920&q=80',
+  contactHero: `${HERO}/hero-01-athlete-training.jpg`,
+  businessHero: `${HERO}/hero-06-business.jpg`,
   ogDefault: '/images/best/logo-full.png',
 } as const;
