@@ -31,10 +31,10 @@ bucket_name = "templatefiles"
 ENVIRONMENT = "production"
 CURRENCY = "cad"
 TIMEZONE = "America/Edmonton"
-FROM_EMAIL = "bookings@send.somi.ceo"
-# BUSINESS_NAME = "Acme Home Services"
-# BUSINESS_NOTIFY_EMAIL = "bookings@client.com"
-# REPLY_TO_EMAIL = "hello@client.com"
+FROM_EMAIL = "bookings@somi.ceo"
+BUSINESS_NAME = "BEST Therapeutics"
+BUSINESS_NOTIFY_EMAIL = "stanierg@gmail.com"
+REPLY_TO_EMAIL = "hello@treytherapy.com"
 
 # ── Secrets — set via `wrangler pages secret put <NAME>` (never commit) ──
 #   STRIPE_SECRET_KEY                Stripe API key (sk_test_… / sk_live_…)
