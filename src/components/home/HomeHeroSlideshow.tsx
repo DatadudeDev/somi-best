@@ -7,7 +7,9 @@ const SLIDE_MS = 7500;
 const FADE_S = 1.4;
 
 export default function HomeHeroSlideshow() {
-  const [activeIndex, setActiveIndex] = useState(0);
+  /** Monotonic counter so AnimatePresence keys never repeat when the deck loops. */
+  const [slideEpoch, setSlideEpoch] = useState(0);
+  const activeIndex = slideEpoch % heroSlides.length;
   const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export default function HomeHeroSlideshow() {
   useEffect(() => {
     if (reducedMotion || heroSlides.length <= 1) return;
     const id = window.setInterval(() => {
-      setActiveIndex((i) => (i + 1) % heroSlides.length);
+      setSlideEpoch((e) => e + 1);
     }, SLIDE_MS);
     return () => window.clearInterval(id);
   }, [reducedMotion]);
@@ -30,9 +32,9 @@ export default function HomeHeroSlideshow() {
 
   return (
     <div className="home-hero-slideshow" aria-hidden="true">
-      <AnimatePresence mode="sync">
+      <AnimatePresence initial={false} mode="sync">
         <motion.div
-          key={activeIndex}
+          key={slideEpoch}
           className="home-hero-slide"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -43,7 +45,7 @@ export default function HomeHeroSlideshow() {
             src={slide.src}
             alt=""
             className={`home-hero-kb--${slide.effect}`}
-            loading={activeIndex === 0 ? 'eager' : 'lazy'}
+            loading={slideEpoch === 0 ? 'eager' : 'lazy'}
             decoding="async"
           />
         </motion.div>
