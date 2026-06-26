@@ -34,11 +34,11 @@ const variantStyles = {
     hoverColor: colors.cream,
   },
   outlineCream: {
-    background: 'transparent',
-    color: colors.cream,
-    border: `1px solid ${colors.cream}`,
-    hoverBg: colors.cream,
-    hoverColor: colors.sageGreen,
+    background: 'rgba(255, 184, 0, 0.14)',
+    color: colors.creamText,
+    border: `2px solid ${colors.sageGreen}`,
+    hoverBg: colors.sageGreen,
+    hoverColor: colors.richBlack,
   },
 };
 
