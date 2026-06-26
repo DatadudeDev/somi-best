@@ -45,7 +45,7 @@ export const HOME_SIZE_TYPE_TO_KEY: Record<string, string> = {
 // SERVER pricing source of truth — create-intent reads these via getBasePrice.
 // Mirrors src/data/pricing.ts — BEST Therapeutics recovery protocol prices.
 export const PRICES: Record<string, Record<string, number>> = {
-  essential: { s1: 89, s2: 104, s3: 129, s4: 181 },
+  essential: { s1: 1, s2: 104, s3: 129, s4: 181 },
   signature: { s1: 129, s2: 161, s3: 209, s4: 274 },
   deep: { s1: 179, s2: 292, s3: 360, s4: 445 },
 };

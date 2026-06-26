@@ -101,7 +101,7 @@ export const HOME_SERVICE_TIERS: HomeServiceTier[] = [
   {
     pkg: 'Essential',
     name: 'Foundation',
-    price: 89,
+    price: 1,
     minutes: 45,
     features: [
       'Targeted soft-tissue work',
@@ -150,7 +150,7 @@ export const SIZE_LABELS: Record<SizeKey, string> = {
 };
 
 export const PRICES: Record<Pkg, Record<SizeKey, number>> = {
-  Essential: { s1: 89, s2: 104, s3: 129, s4: 181 },
+  Essential: { s1: 1, s2: 104, s3: 129, s4: 181 },
   Signature: { s1: 129, s2: 161, s3: 209, s4: 274 },
   Deep:      { s1: 179, s2: 292, s3: 360, s4: 445 },
 };

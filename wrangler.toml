@@ -29,7 +29,7 @@ bucket_name = "templatefiles"
 # FROM_EMAIL            Verified Resend From address (default bookings@send.somi.ceo)
 [vars]
 ENVIRONMENT = "production"
-CURRENCY = "usd"
+CURRENCY = "cad"
 TIMEZONE = "America/Edmonton"
 FROM_EMAIL = "bookings@send.somi.ceo"
 # BUSINESS_NAME = "Acme Home Services"
