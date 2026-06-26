@@ -1,32 +1,34 @@
-# wrangler.toml — Cloudflare Pages bindings for the somi-full-template website.
-# Per-client deploys override [vars] + secrets in the Pages dashboard; the only
-# code-level binding that must point at a real resource is the D1 database.
+# wrangler.toml — Cloudflare Pages bindings for DatadudeDev/somi-best (BEST Therapeutics).
+# Per-client deploy of the somi-full-template website. Bindings are PINNED to this
+# client's tenant resources so git-connected Pages deployments never reset them to
+# template defaults (the prior bug: every push reverted DB/R2 to template and dropped
+# the PAYMENTS binding + USE_CENTRAL_PAYMENTS).
 
-name = "somi-full-template"
+name = "somi-best"
 pages_build_output_dir = "dist"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# D1 — booking/payments schema (customers, bookings, promo_codes, blocked_dates,
-# settings, transactions). Dev DB "somi-full-template"; per-client deploys swap
-# this id for the tenant's somi-db-{ulid}.
+# D1 — BEST's own tenant database (somi-db-00mqu4...), seeded with the booking/payments
+# schema (customers, bookings, promo_codes, blocked_dates, settings, transactions)
+# alongside the tenant operational tables.
 [[d1_databases]]
 binding = "DB"
-database_name = "somi-full-template"
-database_id = "0b75bb49-7d36-4470-80c2-e847b6d39dfb"
+database_name = "somi-db-00mqu4ornuynwbv8cm36kbh0zp"
+database_id = "37256434-35bc-48f6-8002-3f2e63ef11be"
 migrations_dir = "migrations"
 
+# R2 — BEST's own tenant asset bucket.
 [[r2_buckets]]
 binding = "FILES"
-bucket_name = "templatefiles"
+bucket_name = "somi-assets-00mqu4ornuynwbv8cm36kbh0zp"
 
-# ── Environment variables (per-client; defaults below, override in dashboard) ──
-# CURRENCY              Stripe + ledger currency (default "usd")
-# TIMEZONE              IANA tz for availability math (default "America/Denver")
-# BUSINESS_NAME         Public business name shown in emails
-# BUSINESS_NOTIFY_EMAIL Inbox that receives the new-booking notice
-# REPLY_TO_EMAIL        Reply-To on outbound email
-# FROM_EMAIL            Verified Resend From address (default bookings@send.somi.ceo)
+# Central payments — bind the platform somi-payments Worker. Booking endpoints call
+# env.PAYMENTS (no per-client Stripe key) when USE_CENTRAL_PAYMENTS=true.
+[[services]]
+binding = "PAYMENTS"
+service = "somi-payments"
+
 [vars]
 ENVIRONMENT = "production"
 CURRENCY = "cad"
@@ -35,12 +37,10 @@ FROM_EMAIL = "bookings@somi.ceo"
 BUSINESS_NAME = "BEST Therapeutics"
 BUSINESS_NOTIFY_EMAIL = "stanierg@gmail.com"
 REPLY_TO_EMAIL = "hello@treytherapy.com"
+USE_CENTRAL_PAYMENTS = "true"
 
-# ── Secrets — set via `wrangler pages secret put <NAME>` (never commit) ──
-#   STRIPE_SECRET_KEY                Stripe API key (sk_test_… / sk_live_…)
-#   STRIPE_WEBHOOK_SIGNING_SECRET    Stripe webhook signing secret (whsec_…)
-#   RESEND_API_KEY                   Resend API key for inline emails
-#   TURNSTILE_SECRET_KEY             Optional — enables booking bot verification
-# Frontend build var (set at build time, baked into the bundle):
-#   VITE_STRIPE_PUBLISHABLE_KEY      Stripe publishable key (pk_test_… / pk_live_…)
-#   VITE_USE_BOOKING_API=true        Switches the booking form off mock data
+# ── Secrets (set via the Pages dashboard, never committed; persist across deploys) ──
+#   CLIENT_USER_ID            Tenant ULID (00mqu4ornuynwbv8cm36kbh0zp)
+#   INTERNAL_CALLBACK_SECRET  HMAC shared secret with somi-payments for booking callbacks
+# Frontend build var (baked into the bundle at build time, via .env.production):
+#   VITE_USE_BOOKING_API=true Switches the booking form off mock data
