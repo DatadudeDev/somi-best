@@ -839,7 +839,12 @@ export default function BookPage() {
     label: s.label,
     endsBy: formatCompletionTime(s.label, selectedPkg, selectedSize),
   }));
-  const activeSlots: AvailabilitySlot[] = activeDayApiSlots.length > 0
+  // When the live booking API is on, trust its filtered result: an empty list
+  // means the day is genuinely full or past, so we must NOT fall back to the
+  // unfiltered static slot list (that would re-expose booked/past hours).
+  // Fallback is only for mock/disabled mode; API errors already pre-populate
+  // daySlots with the fallback inside fetchDaySlots.
+  const activeSlots: AvailabilitySlot[] = bookingApiEnabled
     ? activeDayApiSlots
     : (activeDay != null && !dayLoading[activeDay] ? activeDayFallbackSlots : []);
   const isLoadingActiveSlots = activeDay != null && !!dayLoading[activeDay];
