@@ -53,7 +53,7 @@ export interface BookingConfig {
 export function resolveConfig(env: Env): BookingConfig {
   return {
     currency: (env.CURRENCY || 'usd').trim().toLowerCase(),
-    timezone: (env.TIMEZONE || 'America/Denver').trim(),
+    timezone: (env.TIMEZONE || 'America/Edmonton').trim(),
     businessName: (env.BUSINESS_NAME || 'Our Service').trim(),
     notifyEmail: env.BUSINESS_NOTIFY_EMAIL?.trim() || null,
     replyToEmail: env.REPLY_TO_EMAIL?.trim() || null,

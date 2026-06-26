@@ -96,6 +96,13 @@ export const FOOTER_CSS = `
         .scf-list a.scf-line:hover {
           color: ${colors.creamText};
         }
+        .scf-maps-link {
+          text-decoration: underline;
+          text-underline-offset: 3px;
+        }
+        .scf-list a.scf-maps-link:hover {
+          color: ${colors.sageGreen};
+        }
         .scf-tel {
           white-space: nowrap;
         }

@@ -11,7 +11,7 @@ import { site } from '../../config/site';
 import { colors, images } from '../../styles/tokens';
 import { QUICK_LINKS } from './footer-data';
 import { FOOTER_CSS } from './footer-styles';
-import { InstagramIcon, FacebookIcon } from './footer-icons';
+import { InstagramIcon, FacebookIcon, TikTokIcon } from './footer-icons';
 
 export default function Footer() {
   return (
@@ -57,7 +57,14 @@ export default function Footer() {
               <h4 className="scf-title">Contact</h4>
               <ul className="scf-list">
                 <li>
-                  <span className="scf-line">{site.location.city}, {site.location.region}</span>
+                  <a
+                    className="scf-line scf-maps-link"
+                    href={site.location.directionsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {site.location.label}
+                  </a>
                 </li>
                 <li>
                   <a className="scf-line" href={`mailto:${site.contact.emailPublic}`}>
@@ -86,6 +93,14 @@ export default function Footer() {
                       aria-label="Facebook"
                     >
                       <FacebookIcon />
+                    </a>
+                    <a
+                      href={site.social.tiktok}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="TikTok"
+                    >
+                      <TikTokIcon />
                     </a>
                   </div>
                 </li>

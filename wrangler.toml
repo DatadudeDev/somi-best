@@ -30,7 +30,7 @@ bucket_name = "templatefiles"
 [vars]
 ENVIRONMENT = "production"
 CURRENCY = "usd"
-TIMEZONE = "America/Denver"
+TIMEZONE = "America/Edmonton"
 FROM_EMAIL = "bookings@send.somi.ceo"
 # BUSINESS_NAME = "Acme Home Services"
 # BUSINESS_NOTIFY_EMAIL = "bookings@client.com"

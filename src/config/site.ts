@@ -13,25 +13,33 @@ export const site = {
   domain: 'https://besttherapeutics.com',
 
   contact: {
-    email: 'book@besttherapeutics.com',
-    emailPublic: 'hello@besttherapeutics.com',
-    phone: '(303) 555-0238',
-    phoneTel: '+13035550238',
+    email: 'hello@treytherapy.com',
+    emailPublic: 'hello@treytherapy.com',
+    phone: '+1 403-399-9154',
+    phoneTel: '+14033999154',
   },
 
   location: {
-    city: 'Denver',
-    region: 'CO',
-    country: 'US',
-    geo: { lat: 39.7392, lng: -104.9903 },
+    city: 'Calgary',
+    region: 'AB',
+    country: 'CA',
+    geo: { lat: 51.0447, lng: -114.0719 },
+    /** Google Place ID — used for Maps directions + business profile link */
+    placeId: 'ChIJE2UmPeB7cVMRIuvzfkwQuyg',
+    label: 'Calgary, Canada',
+    /** Directions from the user's current location (Google Maps) */
+    directionsUrl:
+      'https://www.google.com/maps/dir/?api=1&destination_place_id=ChIJE2UmPeB7cVMRIuvzfkwQuyg',
   },
 
   social: {
-    instagram: 'https://instagram.com/besttherapeutics',
-    facebook: 'https://facebook.com/besttherapeutics',
+    instagram: 'https://www.instagram.com/treybestyycrmt',
+    facebook: 'https://www.facebook.com/treybest',
+    tiktok: 'https://www.tiktok.com/@better.every.second',
   },
 
-  googleProfileUrl: 'https://g.page/besttherapeutics',
+  googleProfileUrl:
+    'https://www.google.com/maps/place/?q=place_id:ChIJE2UmPeB7cVMRIuvzfkwQuyg',
 
   services: {
     sectionLabel: 'Recovery Protocols',
