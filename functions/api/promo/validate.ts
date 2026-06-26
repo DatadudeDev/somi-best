@@ -56,7 +56,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const dollars = promo.value / 100;
       description = `$${dollars.toFixed(2)} off your booking`;
       discountAmount = dollars;
-    } else if (promo.type === 'free_clean') {
+    } else if (promo.type === 'complimentary') {
       description = 'Free booking — $0 total';
       discountAmount = body.basePrice;
     } else if (promo.type === 'quote_price') {

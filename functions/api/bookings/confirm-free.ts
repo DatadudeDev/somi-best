@@ -26,7 +26,7 @@ interface ConfirmFreeBody {
   email?: string;
   phone?: string;
   service?: string;
-  homeSize?: string;
+  sizeKey?: string;
   date?: string;
   time?: string;
   addOns?: AddOnInput[];
@@ -34,7 +34,7 @@ interface ConfirmFreeBody {
   promoCode?: string;
   frequency?: string;
   serviceAddress?: string;
-  mode?: 'residential' | 'business';
+  mode?: 'individual' | 'business';
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -42,20 +42,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const env = context.env;
     const config = resolveConfig(env);
     const body = await context.request.json() as ConfirmFreeBody;
-    const { name, email, phone, service, homeSize, date, time, promoCode } = body;
+    const { name, email, phone, service, sizeKey, date, time, promoCode } = body;
 
-    if (!name || !email || !phone || !service || !homeSize || !date || !time) {
-      return jsonError('Missing required fields: name, email, phone, service, homeSize, date, time');
+    if (!name || !email || !phone || !service || !sizeKey || !date || !time) {
+      return jsonError('Missing required fields: name, email, phone, service, sizeKey, date, time');
     }
     if (!promoCode) return jsonError('A promo code is required for free bookings');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonError('date must be YYYY-MM-DD');
 
-    const mode: BookingMode = body.mode === 'business' ? 'business' : 'residential';
-    const resolved = resolveService(service, homeSize, mode);
+    const mode: BookingMode = body.mode === 'business' ? 'business' : 'individual';
+    const resolved = resolveService(service, sizeKey, mode);
     if (!resolved) return jsonError(`Invalid service: ${service}`);
 
     const priced = await computePricing(
-      env.DB, resolved.baseServiceKey, homeSize, mode, body.addOns ?? [], promoCode,
+      env.DB, resolved.baseServiceKey, sizeKey, mode, body.addOns ?? [], promoCode,
     );
     if (!priced.ok) return jsonError(priced.error, 400);
     if (priced.pricing.totalCents !== 0) {
@@ -63,7 +63,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const normalizedTime = normalizeTime(time);
-    const duration = getDuration(resolved.baseServiceKey, homeSize);
+    const duration = getDuration(resolved.baseServiceKey, sizeKey);
 
     const slot = await checkSlotAvailability(env.DB, config, date, normalizedTime, duration);
     if (!slot.ok) return jsonError(slot.error, slot.status);
@@ -73,7 +73,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       email,
       phone,
       serviceKey: resolved.serviceKey,
-      homeSizeType: resolved.homeSizeType,
+      sizeKey: resolved.sizeKey,
       date,
       time: normalizedTime,
       estimatedHours: duration,

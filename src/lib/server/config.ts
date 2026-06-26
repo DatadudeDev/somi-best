@@ -32,6 +32,14 @@ export interface Env {
   BUSINESS_NOTIFY_EMAIL?: string;
   REPLY_TO_EMAIL?: string;
   FROM_EMAIL?: string;
+  /** When "true", checkout requires a service address and emails include a Where/Address row. */
+  BOOKING_REQUIRES_ADDRESS?: string;
+  /** Public site origin for email links (no trailing slash). */
+  SITE_ORIGIN?: string;
+  /** Absolute URL to logo mark for emails. */
+  EMAIL_LOGO_URL?: string;
+  /** Short location line in email footer (e.g. "Calgary, AB"). */
+  EMAIL_LOCATION_LABEL?: string;
 }
 
 export interface BookingConfig {
@@ -47,10 +55,19 @@ export interface BookingConfig {
   replyToEmail: string | null;
   /** Verified From address for Resend. */
   fromEmail: string;
+  /** When true, address is required at checkout and shown in emails. */
+  requiresAddress: boolean;
+  /** Public site origin (https://…, no trailing slash). */
+  siteOrigin: string;
+  /** Logo URL for transactional emails. */
+  emailLogoUrl: string;
+  /** Optional footer location label. */
+  locationLabel?: string;
 }
 
 /** Resolve per-client config from Pages env vars with sane defaults. */
 export function resolveConfig(env: Env): BookingConfig {
+  const siteOrigin = (env.SITE_ORIGIN || 'https://besttherapeutics.com').trim().replace(/\/$/, '');
   return {
     currency: (env.CURRENCY || 'usd').trim().toLowerCase(),
     timezone: (env.TIMEZONE || 'America/Edmonton').trim(),
@@ -58,6 +75,10 @@ export function resolveConfig(env: Env): BookingConfig {
     notifyEmail: env.BUSINESS_NOTIFY_EMAIL?.trim() || null,
     replyToEmail: env.REPLY_TO_EMAIL?.trim() || null,
     fromEmail: (env.FROM_EMAIL || 'bookings@send.somi.ceo').trim(),
+    requiresAddress: env.BOOKING_REQUIRES_ADDRESS === 'true',
+    siteOrigin,
+    emailLogoUrl: (env.EMAIL_LOGO_URL || `${siteOrigin}/images/best/logo-mark.png`).trim(),
+    locationLabel: env.EMAIL_LOCATION_LABEL?.trim() || undefined,
   };
 }
 

@@ -166,7 +166,7 @@ export default function HomePage() {
             {site.hero.subheadline}
           </p>
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap', width: '100%' }}>
-            <Button variant="primary" size="large" href="/book?pkg=Premier&size=s1">
+            <Button variant="primary" size="large" href="/book?pkg=Tier3&size=s1">
               {site.hero.primaryCta}
             </Button>
             <Button variant="outlineCream" href="/contact">
@@ -388,13 +388,13 @@ export default function HomePage() {
       {/* PLACEHOLDER (reskin): product / add-on section copy and image */}
       <section id="products" style={{ background: colors.white }}>
         <style>{`
-          .almost-friday-grid {
+          .product-showcase-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 48px;
             align-items: center;
           }
-          .almost-friday-img {
+          .product-showcase-media {
             border-radius: 0;
             overflow: hidden;
             height: 400px;
@@ -405,37 +405,37 @@ export default function HomePage() {
             justify-content: center;
             order: 1;
           }
-          .almost-friday-img img {
+          .product-showcase-media img {
             max-height: 90%;
             max-width: 90%;
             object-fit: contain;
           }
-          .almost-friday-content {
+          .product-showcase-content {
             order: 0;
           }
-          .scent-grid {
+          .product-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
             margin-bottom: 24px;
           }
           @media (max-width: 640px) {
-            .almost-friday-img {
+            .product-showcase-media {
               height: 260px;
               order: 0;
             }
-            .almost-friday-content {
+            .product-showcase-content {
               order: 1;
             }
-            .scent-grid {
+            .product-grid {
               grid-template-columns: 1fr;
             }
           }
         `}</style>
         <AnimatedSection>
           <div className="container">
-            <div className="almost-friday-grid">
-              <div className="almost-friday-content">
+            <div className="product-showcase-grid">
+              <div className="product-showcase-content">
                 <SectionLabel text={site.productSection.label} />
                 <h2 style={{ ...typography.h2, color: colors.charcoal, marginBottom: '20px' }}>
                   {site.productSection.headline}
@@ -447,8 +447,8 @@ export default function HomePage() {
                 }}>
                   {site.productSection.body}
                 </p>
-                <div className="scent-grid">
-                  {site.productSection.items.map((scent, i) => (
+                <div className="product-grid">
+                  {site.productSection.items.map((product, i) => (
                     <div key={i} style={{
                       padding: '12px 16px',
                       background: colors.cream,
@@ -461,13 +461,13 @@ export default function HomePage() {
                         fontWeight: 500,
                         color: colors.sageGreen,
                       }}>
-                        {scent.name}
+                        {product.name}
                       </div>
-                      {scent.scent && <div style={{ ...typography.caption, color: colors.charcoal, fontSize: '13px', fontWeight: 500, marginTop: '2px' }}>
-                        {scent.scent}
+                      {product.priceLabel && <div style={{ ...typography.caption, color: colors.charcoal, fontSize: '13px', fontWeight: 500, marginTop: '2px' }}>
+                        {product.priceLabel}
                       </div>}
                       <div style={{ ...typography.caption, color: colors.warmGray, fontSize: '12px', marginTop: '2px' }}>
-                        {scent.notes}
+                        {product.notes}
                       </div>
                     </div>
                   ))}
@@ -482,8 +482,8 @@ export default function HomePage() {
                   {site.productSection.footnote}
                 </p>
               </div>
-              <div className="almost-friday-img">
-                <img src={images.almostFridayBottles} alt="BEST Therapeutics logo mark" />
+              <div className="product-showcase-media">
+                <img src={images.productHero} alt="BEST Therapeutics logo mark" />
               </div>
             </div>
           </div>
@@ -516,7 +516,7 @@ export default function HomePage() {
               <span style={{ display: 'block' }}>{site.finalCta.line1}</span>
               <span style={{ display: 'block', marginLeft: 'clamp(1.25rem, 5vw, 3rem)' }}>{site.finalCta.line2}</span>
             </h2>
-            <Button variant="primary" size="large" href="/book?pkg=Premier&size=s1">
+            <Button variant="primary" size="large" href="/book?pkg=Tier3&size=s1">
               {site.finalCta.button}
             </Button>
           </div>

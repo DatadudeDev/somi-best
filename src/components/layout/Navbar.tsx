@@ -6,15 +6,15 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { site } from '../../config/site';
 import {
-  homeSectionTo,
-  navHomeSectionLinkActive,
-  scrollToHomeSection,
-  type HomeSectionId,
-} from '../../lib/home-services-nav';
+  siteSectionTo,
+  navSiteSectionLinkActive,
+  scrollToSiteSection,
+  type SiteSectionId,
+} from '../../lib/services-nav';
 import { colors, fonts, typography, images } from '../../styles/tokens';
 import Button from '../ui/Button';
 
-const navLinks: { label: string; section: HomeSectionId }[] = [
+const navLinks: { label: string; section: SiteSectionId }[] = [
   { label: site.nav.services, section: 'services' },
   { label: site.nav.testimonials, section: 'testimonials' },
   { label: site.nav.products, section: 'products' },
@@ -28,10 +28,10 @@ export default function Navbar() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMobileOpen(false), [location]);
 
-  const handleSectionNav = (section: HomeSectionId) => {
+  const handleSectionNav = (section: SiteSectionId) => {
     setMobileOpen(false);
     if (location.pathname === '/' && location.hash === `#${section}`) {
-      scrollToHomeSection(section);
+      scrollToSiteSection(section);
     }
   };
 
@@ -75,13 +75,13 @@ export default function Navbar() {
             {navLinks.map(link => (
               <Link
                 key={link.section}
-                to={homeSectionTo(link.section)}
+                to={siteSectionTo(link.section)}
                 onClick={() => handleSectionNav(link.section)}
                 style={{
                   ...typography.sectionLabel,
                   fontSize: '12px',
                   color: colors.creamText,
-                  opacity: navHomeSectionLinkActive(link.section, location) ? 1 : 0.65,
+                  opacity: navSiteSectionLinkActive(link.section, location) ? 1 : 0.65,
                   transition: 'opacity 0.2s ease',
                   textDecoration: 'none',
                 }}
@@ -89,7 +89,7 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
-            <Button variant="primary" size="compact" href="/book?pkg=Premier&size=s1">
+            <Button variant="primary" size="compact" href="/book?pkg=Tier3&size=s1">
               {site.nav.bookCta}
             </Button>
           </div>
@@ -152,7 +152,7 @@ export default function Navbar() {
             {navLinks.map(link => (
               <Link
                 key={link.section}
-                to={homeSectionTo(link.section)}
+                to={siteSectionTo(link.section)}
                 onClick={() => handleSectionNav(link.section)}
                 style={{
                   fontFamily: fonts.display,
@@ -167,7 +167,7 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
-            <Button href="/book?pkg=Premier&size=s1" size="large">{site.nav.bookCta}</Button>
+            <Button href="/book?pkg=Tier3&size=s1" size="large">{site.nav.bookCta}</Button>
           </motion.div>
         )}
       </AnimatePresence>

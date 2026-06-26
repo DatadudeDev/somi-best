@@ -47,7 +47,7 @@ export interface CreateIntentResponse {
 /* ── promo validate response ── */
 export interface PromoResponse {
   valid: boolean;
-  type?: 'percent_off' | 'fixed_off' | 'free_clean' | 'quote_price';
+  type?: 'percent_off' | 'fixed_off' | 'complimentary' | 'quote_price';
   value?: number;
   description?: string;
   discountAmount?: number;

@@ -20,7 +20,7 @@ export interface QuoteIntakeFormProps {
   unitNumber: string;
   onUnitChange: (v: string) => void;
   customServices: string[];
-  homeSize: string;
+  sizeKey: string;
   pendingDropFiles: File[];
   onDropFilesConsumed: () => void;
   selectedDate?: string;

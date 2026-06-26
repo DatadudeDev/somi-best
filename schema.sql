@@ -1,7 +1,5 @@
--- somi-full-template — booking/payments website schema (v1)
--- Per-client D1. In production this is somi-db-{ulid}; in dev it's the
--- standalone `somi-full-template` D1. These tables are seeded alongside the
--- Somi operational tables at signup.
+-- Service website template — booking/payments schema
+-- Per-client D1 (somi-db-{tenant_ulid}).
 
 CREATE TABLE IF NOT EXISTS customers (
   id                  TEXT PRIMARY KEY,
@@ -18,7 +16,7 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE TABLE IF NOT EXISTS promo_codes (
   id            TEXT PRIMARY KEY,
   code          TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  type          TEXT NOT NULL,                 -- percent_off | fixed_off | free_clean
+  type          TEXT NOT NULL,                 -- percent_off | fixed_off | complimentary | quote_price
   value         INTEGER NOT NULL DEFAULT 0,    -- percent (0-100) or cents
   max_uses      INTEGER,
   current_uses  INTEGER NOT NULL DEFAULT 0,
@@ -43,8 +41,8 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS bookings (
   id                        TEXT PRIMARY KEY,
   customer_id               TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
-  service                   TEXT NOT NULL,
-  home_size                 TEXT NOT NULL,
+  service                   TEXT NOT NULL,           -- tier1 | tier2 | tier3 | tier4 | biz_tier*
+  size_key                  TEXT NOT NULL,           -- s1 | s2 | s3 | s4
   date                      TEXT NOT NULL,           -- YYYY-MM-DD
   time                      TEXT NOT NULL,           -- HH:MM (24h)
   estimated_hours           REAL NOT NULL DEFAULT 2.0,

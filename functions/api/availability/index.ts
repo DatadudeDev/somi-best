@@ -1,6 +1,6 @@
 /**
  * functions/api/availability/index.ts
- * GET /api/availability?date=&service=&homeSize=
+ * GET /api/availability?date=&service=&sizeKey=
  *
  * Returns the bookable start times for a single day:
  *   { date, available, blocked, slots: [{ hour, label, endsBy }], bookingCount, capacity }
@@ -43,8 +43,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const config = resolveConfig(env);
   const url = new URL(context.request.url);
   const date = url.searchParams.get('date');
-  const service = url.searchParams.get('service') ?? 'essential';
-  const homeSize = url.searchParams.get('homeSize') ?? 's2';
+  const service = url.searchParams.get('service') ?? 'tier1';
+  const sizeKey = url.searchParams.get('sizeKey') ?? 's2';
 
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return jsonError('date is required (YYYY-MM-DD)');
@@ -92,7 +92,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   if (bookingCount >= capacity) return jsonOk(empty(false, bookingCount));
 
-  const duration = getDuration(service, homeSize);
+  const duration = getDuration(service, sizeKey);
   const minHour = minStartHourForDate(date, today, currentHourInTimezone(config.timezone));
 
   const slots: AvailabilitySlot[] = getAvailableStartHours(duration)

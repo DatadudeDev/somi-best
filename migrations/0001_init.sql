@@ -1,7 +1,5 @@
--- somi-full-template — booking/payments website schema (v1)
--- Per-client D1. In production this is somi-db-{ulid}; in dev it's the
--- standalone `somi-full-template` D1. These tables are seeded alongside the
--- Somi operational tables at signup.
+-- Service website template — booking/payments schema (initial)
+-- See schema.sql for annotated reference.
 
 CREATE TABLE IF NOT EXISTS customers (
   id                  TEXT PRIMARY KEY,
@@ -18,8 +16,8 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE TABLE IF NOT EXISTS promo_codes (
   id            TEXT PRIMARY KEY,
   code          TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  type          TEXT NOT NULL,                 -- percent_off | fixed_off | free_clean
-  value         INTEGER NOT NULL DEFAULT 0,    -- percent (0-100) or cents
+  type          TEXT NOT NULL,
+  value         INTEGER NOT NULL DEFAULT 0,
   max_uses      INTEGER,
   current_uses  INTEGER NOT NULL DEFAULT 0,
   expires_at    TEXT,
@@ -29,7 +27,7 @@ CREATE TABLE IF NOT EXISTS promo_codes (
 
 CREATE TABLE IF NOT EXISTS blocked_dates (
   id          TEXT PRIMARY KEY,
-  date        TEXT NOT NULL UNIQUE,            -- YYYY-MM-DD
+  date        TEXT NOT NULL UNIQUE,
   reason      TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
@@ -44,17 +42,17 @@ CREATE TABLE IF NOT EXISTS bookings (
   id                        TEXT PRIMARY KEY,
   customer_id               TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
   service                   TEXT NOT NULL,
-  home_size                 TEXT NOT NULL,
-  date                      TEXT NOT NULL,           -- YYYY-MM-DD
-  time                      TEXT NOT NULL,           -- HH:MM (24h)
+  size_key                  TEXT NOT NULL,
+  date                      TEXT NOT NULL,
+  time                      TEXT NOT NULL,
   estimated_hours           REAL NOT NULL DEFAULT 2.0,
   add_ons                   TEXT NOT NULL DEFAULT '[]',
   notes                     TEXT,
-  base_price                INTEGER NOT NULL DEFAULT 0,    -- cents
-  add_on_total              INTEGER NOT NULL DEFAULT 0,    -- cents
+  base_price                INTEGER NOT NULL DEFAULT 0,
+  add_on_total              INTEGER NOT NULL DEFAULT 0,
   discount_pct              REAL NOT NULL DEFAULT 0,
-  total                     INTEGER NOT NULL DEFAULT 0,    -- cents
-  status                    TEXT NOT NULL DEFAULT 'pending', -- pending | confirmed | cancelled
+  total                     INTEGER NOT NULL DEFAULT 0,
+  status                    TEXT NOT NULL DEFAULT 'pending',
   stripe_payment_intent_id  TEXT,
   promo_code_id             TEXT REFERENCES promo_codes(id) ON DELETE SET NULL,
   created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
@@ -65,8 +63,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   id                        TEXT PRIMARY KEY,
   customer_id               TEXT NOT NULL REFERENCES customers(id),
   booking_id                TEXT REFERENCES bookings(id),
-  type                      TEXT NOT NULL,           -- charge | refund
-  amount                    INTEGER NOT NULL,        -- cents
+  type                      TEXT NOT NULL,
+  amount                    INTEGER NOT NULL,
   currency                  TEXT NOT NULL DEFAULT 'usd',
   stripe_payment_intent_id  TEXT,
   stripe_refund_id          TEXT,

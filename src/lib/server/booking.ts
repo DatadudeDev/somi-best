@@ -2,9 +2,6 @@
  * src/lib/server/booking.ts
  * Server-side booking spine: pricing, availability, idempotent D1 writes,
  * promo redemption, transaction ledger, and inline email dispatch.
- *
- * Ported from Saje with everything outside the booking spine removed
- * (rewards/points, quotes, Google Calendar, Inngest, Plivo SMS, telemetry).
  */
 
 import type { Env, BookingConfig } from './config.ts';
@@ -13,24 +10,21 @@ import { isBookableDay, minStartHourForDate } from '../booking/business-hours.ts
 import { sendBookingEmails, type BookingEmailData } from './email.ts';
 import {
   SERVICE_DISPLAY_TO_KEY,
-  HOME_SIZE_KEY_TO_TYPE,
+  normalizeSizeKey,
   getAvailableStartHours,
   getBasePriceForMode,
   calcAddOnTotal,
   BIZ_SERVICE_PREFIX,
 } from '../booking/constants.ts';
 
-export type BookingMode = 'residential' | 'business';
+export type BookingMode = 'individual' | 'business';
 
-export interface AddOnInput {
-  id: string;
-  quantity?: number;
-}
+export const PROMO_TYPE_COMPLIMENTARY = 'complimentary' as const;
 
 export interface PromoCodeRow {
   id: string;
   code: string;
-  type: 'percent_off' | 'fixed_off' | 'free_clean' | 'quote_price';
+  type: 'percent_off' | 'fixed_off' | typeof PROMO_TYPE_COMPLIMENTARY | 'quote_price';
   value: number;
   max_uses: number | null;
   current_uses: number;
@@ -43,6 +37,15 @@ const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+
+const TIER_DISPLAY: Record<string, string> = {
+  tier1: 'Tier 1',
+  tier2: 'Tier 2',
+  tier3: 'Tier 3',
+  tier4: 'Tier 4',
+};
+
+const VALID_SERVICE_KEYS = new Set(['tier1', 'tier2', 'tier3', 'tier4']);
 
 // ─── Formatting / parsing ───────────────────────────────────────────────
 
@@ -84,12 +87,12 @@ export function formatDateLabel(dateStr: string): string {
   return `${name} ${d}, ${y}`;
 }
 
-/** "biz_essential" -> "Business Essential"; "essential" -> "Essential". */
+/** "biz_tier1" -> "Business Tier 1"; "tier1" -> "Tier 1". */
 export function serviceLabel(serviceKey: string): string {
   const isBiz = serviceKey.startsWith(BIZ_SERVICE_PREFIX);
   const base = isBiz ? serviceKey.slice(BIZ_SERVICE_PREFIX.length) : serviceKey;
-  const titled = base.charAt(0).toUpperCase() + base.slice(1);
-  return isBiz ? `Business ${titled}` : titled;
+  const label = TIER_DISPLAY[base] ?? base.charAt(0).toUpperCase() + base.slice(1);
+  return isBiz ? `Business ${label}` : label;
 }
 
 export function formatMoney(cents: number, currency: string): string {
@@ -102,22 +105,21 @@ export function formatMoney(cents: number, currency: string): string {
 export interface ResolvedService {
   baseServiceKey: string;
   serviceKey: string;
-  homeSizeType: string;
+  sizeKey: string;
 }
 
 /** Resolve display service + size keys to canonical DB keys, or null if invalid. */
 export function resolveService(
   service: string,
-  homeSize: string,
+  sizeKey: string,
   mode: BookingMode,
 ): ResolvedService | null {
   const baseServiceKey = SERVICE_DISPLAY_TO_KEY[service] ?? service.toLowerCase();
-  if (!['essential', 'signature', 'premier', 'ultimate', 'deep'].includes(baseServiceKey)) {
+  if (!VALID_SERVICE_KEYS.has(baseServiceKey)) {
     return null;
   }
   const serviceKey = mode === 'business' ? `${BIZ_SERVICE_PREFIX}${baseServiceKey}` : baseServiceKey;
-  const homeSizeType = HOME_SIZE_KEY_TO_TYPE[homeSize] ?? homeSize;
-  return { baseServiceKey, serviceKey, homeSizeType };
+  return { baseServiceKey, serviceKey, sizeKey: normalizeSizeKey(sizeKey) };
 }
 
 // ─── Capacity ─────────────────────────────────────────────────
@@ -180,7 +182,7 @@ export async function checkSlotAvailability(
   }
 
   if (!getAvailableStartHours(duration).includes(startHour)) {
-    return { ok: false, status: 409, error: 'Selected time slot is not available for the chosen service/home size' };
+    return { ok: false, status: 409, error: 'Selected time slot is not available for the chosen service and size' };
   }
 
   const slotTaken = await db
@@ -212,12 +214,12 @@ export type PricingOutcome = { ok: true; pricing: Pricing } | { ok: false; error
 export async function computePricing(
   db: D1Database,
   baseServiceKey: string,
-  homeSize: string,
+  sizeKey: string,
   mode: BookingMode,
   addOns: AddOnInput[],
   promoCode: string | undefined,
 ): Promise<PricingOutcome> {
-  const basePrice = getBasePriceForMode(baseServiceKey, homeSize, mode);
+  const basePrice = getBasePriceForMode(baseServiceKey, sizeKey, mode);
   const addOnTotal = calcAddOnTotal(addOns);
   const subtotalDollars = basePrice + addOnTotal;
 
@@ -244,7 +246,7 @@ export async function computePricing(
       discountDollars = Math.round(subtotalDollars * (promoCodeRow.value / 100) * 100) / 100;
     } else if (promoCodeRow.type === 'fixed_off') {
       discountDollars = promoCodeRow.value / 100;
-    } else if (promoCodeRow.type === 'free_clean') {
+    } else if (promoCodeRow.type === PROMO_TYPE_COMPLIMENTARY) {
       discountDollars = subtotalDollars;
     } else if (promoCodeRow.type === 'quote_price') {
       discountDollars = Math.max(0, subtotalDollars - promoCodeRow.value / 100);
@@ -270,12 +272,17 @@ export async function computePricing(
 
 // ─── Booking write (idempotent) ────────────────────────────────────
 
+export interface AddOnInput {
+  id: string;
+  quantity?: number;
+}
+
 export interface BookingWritePayload {
   name: string;
   email: string;
   phone: string;
   serviceKey: string;
-  homeSizeType: string;
+  sizeKey: string;
   date: string;
   time: string; // normalized HH:MM
   estimatedHours: number;
@@ -316,7 +323,6 @@ export async function writeBooking(
 ): Promise<ConfirmResult> {
   const db = env.DB;
 
-  // Idempotent guard — paid bookings are keyed on the payment intent.
   if (payload.stripePaymentIntentId) {
     const existing = await db
       .prepare(`SELECT id, customer_id FROM bookings WHERE stripe_payment_intent_id = ? LIMIT 1`)
@@ -332,7 +338,6 @@ export async function writeBooking(
   const e164Phone = toE164(payload.phone);
   const email = payload.email.toLowerCase();
 
-  // Find or create the customer (match on email, then phone).
   let customer = await db
     .prepare(`SELECT id, stripe_customer_id FROM customers WHERE email = ? LIMIT 1`)
     .bind(email)
@@ -368,7 +373,6 @@ export async function writeBooking(
       .run();
   }
 
-  // Re-check the slot to guard against a race during payment.
   const slotTaken = await db
     .prepare(`SELECT id FROM bookings WHERE date = ? AND time = ? AND status = 'confirmed' LIMIT 1`)
     .bind(payload.date, payload.time)
@@ -381,7 +385,7 @@ export async function writeBooking(
   await db
     .prepare(
       `INSERT INTO bookings
-         (id, customer_id, service, home_size, date, time, estimated_hours, add_ons, notes,
+         (id, customer_id, service, size_key, date, time, estimated_hours, add_ons, notes,
           base_price, add_on_total, discount_pct, total, status, stripe_payment_intent_id,
           promo_code_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?)`,
@@ -390,7 +394,7 @@ export async function writeBooking(
       bookingId,
       customerId,
       payload.serviceKey,
-      payload.homeSizeType,
+      payload.sizeKey,
       payload.date,
       payload.time,
       payload.estimatedHours,
@@ -407,7 +411,6 @@ export async function writeBooking(
     )
     .run();
 
-  // Ledger row — only for actual charges.
   if (payload.totalCents > 0 && payload.stripePaymentIntentId) {
     await db
       .prepare(
@@ -428,7 +431,6 @@ export async function writeBooking(
       .run();
   }
 
-  // Increment promo usage.
   if (payload.promoCodeId) {
     await db
       .prepare(`UPDATE promo_codes SET current_uses = current_uses + 1 WHERE id = ?`)
@@ -436,7 +438,6 @@ export async function writeBooking(
       .run();
   }
 
-  // Inline emails — best effort.
   const emailData: BookingEmailData = {
     customerName: payload.name,
     customerEmail: email,
@@ -462,7 +463,7 @@ export function buildIntentMetadata(p: BookingWritePayload): Record<string, stri
     email: p.email.toLowerCase(),
     phone: p.phone,
     service: p.serviceKey,
-    homeSize: p.homeSizeType,
+    sizeKey: p.sizeKey,
     date: p.date,
     time: p.time,
     addOns: p.addOnsJson.slice(0, 490),
@@ -505,8 +506,8 @@ export function extractBookingFromMetadata(
   paymentIntentId: string,
   stripeCustomerId: string,
 ): BookingWritePayload | null {
-  const { name, email, phone, service, homeSize, date, time } = metadata;
-  if (!name || !email || !phone || !service || !homeSize || !date || !time) {
+  const { name, email, phone, service, sizeKey, date, time } = metadata;
+  if (!name || !email || !phone || !service || !sizeKey || !date || !time) {
     return null;
   }
   return {
@@ -514,7 +515,7 @@ export function extractBookingFromMetadata(
     email,
     phone,
     serviceKey: service,
-    homeSizeType: homeSize,
+    sizeKey: normalizeSizeKey(sizeKey),
     date,
     time,
     estimatedHours: parseFloat(metadata.estimatedHours || '3'),
@@ -530,4 +531,3 @@ export function extractBookingFromMetadata(
     stripeCustomerId: stripeCustomerId || null,
   };
 }
-

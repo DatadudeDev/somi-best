@@ -7,6 +7,7 @@ import { colors, fonts, typography } from '../styles/tokens';
 import { site } from '../config/site';
 import { addOns as addOnData, frequencyDiscounts, PKG_DISPLAY_NAME, PRICES, SIZE_LABELS, type Frequency, type SizeKey, type Pkg } from '../data/pricing';
 import { getBasePriceForMode } from '../lib/booking/constants';
+import { bookingRequiresAddress } from '../lib/booking/booking-config';
 import { getMockDaySlots, getMockMonthAvailability, getFirstAvailableMonth, monthHasAvailability, isBookingApiEnabled } from '../lib/booking/mock-availability';
 import BookingStepper from '../components/ui/BookingStepper';
 import Button from '../components/ui/Button';
@@ -43,7 +44,7 @@ import { STRIPE_APPEARANCE, navBtn, emptyCell, inputStyle, textareaStyle, inline
 import { ADDON_ICONS, ADDON_ICON_SIZE, ADDON_ICON_PADDING, ADDON_CARD_GAP } from '../components/booking/addon-icons';
 
 function bookingServiceKey(pkg: string, custom: boolean): string {
-  if (custom || pkg === 'Custom') return 'essential';
+  if (custom || pkg === 'Custom') return 'tier1';
   return pkg.toLowerCase();
 }
 
@@ -51,11 +52,11 @@ export default function BookPage() {
   useSEO(seoMeta.book);
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const pkgParam = params.get('pkg') || 'Essential';
+  const pkgParam = params.get('pkg') || 'Tier1';
   const sizeParam = params.get('size') || 's1';
 
-  // Booking mode — drives business vs residential UI + pricing
-  const bookingMode = (params.get('mode') || 'residential') as 'residential' | 'business' | 'custom';
+  // Booking mode — drives business vs individual UI + pricing
+  const bookingMode = (params.get('mode') || 'individual') as 'individual' | 'business' | 'custom';
   const isBusiness = bookingMode === 'business';
   // Custom quote mode — hides scheduling + pricing, shows QuoteIntakeForm at step 3
   const isCustom = bookingMode === 'custom';
@@ -121,7 +122,7 @@ export default function BookPage() {
   /** Keep pkg/size in sync when arriving via bento links (same route, new query). */
   const searchKey = params.toString();
   useEffect(() => {
-    const nextPkg = params.get('pkg') || 'Essential';
+    const nextPkg = params.get('pkg') || 'Tier1';
     const nextSize = params.get('size') || 's1';
     setSelectedPkg(nextPkg);
     setSelectedSize(nextSize);
@@ -175,7 +176,7 @@ export default function BookPage() {
 
   /* checkout state */
   const [selectedAddOns, setSelectedAddOns] = useState<Record<string,{on:boolean,qty:number}>>({});
-  const [jobNotes, setJobNotes] = useState('');
+  const [sessionNotes, setSessionNotes] = useState('');
   const [contactName, setContactName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('+1 ');
@@ -203,6 +204,7 @@ export default function BookPage() {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [customerSessionClientSecret, setCustomerSessionClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [checkoutInitialized, setCheckoutInitialized] = useState(false);
   // Central-payments (Connect) — supplied by create-intent when USE_CENTRAL_PAYMENTS is on.
   const [stripeAccount, setStripeAccount] = useState<string | undefined>(undefined);
   const [publishableKey, setPublishableKey] = useState<string | undefined>(undefined);
@@ -220,18 +222,18 @@ export default function BookPage() {
   const basePrice = isBusiness
     ? getBasePriceForMode(selectedPkg, selectedSize, 'business')
     : getPrice(selectedPkg, selectedSize);
-  const applicableAddOns = addOnData.filter(a => !(ADDONS_INCLUDED_IN[selectedPkg] || []).includes(a.id));
+  const applicableAddOns = addOnData.filter(a => !(ADDONS_INCLUDED_IN[selectedPkg as Pkg] || []).includes(a.id));
   const addOnTotal = applicableAddOns.reduce((sum, a) => {
     const state = selectedAddOns[a.id];
     if (!state?.on) return sum;
     return sum + a.price * (a.unit ? state.qty : 1);
   }, 0);
   const discountInfo = frequencyDiscounts[frequency];
-  const perCleanSubtotal = basePrice + addOnTotal;
-  const discountAmount = Math.round(perCleanSubtotal * discountInfo.discount * 100) / 100;
-  const perCleanAfterFrequencyDiscount = perCleanSubtotal - discountAmount;
-  const totalCleans = selections.length || 1;
-  const subtotalBeforePromo = perCleanAfterFrequencyDiscount * totalCleans;
+  const perVisitSubtotal = basePrice + addOnTotal;
+  const discountAmount = Math.round(perVisitSubtotal * discountInfo.discount * 100) / 100;
+  const perVisitAfterFrequencyDiscount = perVisitSubtotal - discountAmount;
+  const totalVisits = selections.length || 1;
+  const subtotalBeforePromo = perVisitAfterFrequencyDiscount * totalVisits;
 
   /* apply promo discount on top of frequency discount */
   let promoDiscountAmount = 0;
@@ -242,7 +244,7 @@ export default function BookPage() {
       // quote_price sets a fixed total (cents) — derive discount from that
       quotePriceOverrideDollars = promoResult.finalPrice / 100;
       promoDiscountAmount = Math.max(0, subtotalBeforePromo - quotePriceOverrideDollars);
-    } else if (promoResult.type === 'free_clean') {
+    } else if (promoResult.type === 'complimentary') {
       promoDiscountAmount = subtotalBeforePromo;
     } else if (promoResult.discountAmount != null) {
       promoDiscountAmount = promoResult.discountAmount;
@@ -261,9 +263,22 @@ export default function BookPage() {
   const grandTotal = Math.round((subtotalAfterAllDiscounts + gstAmount) * 100) / 100;
   const isFreeBooking = grandTotal === 0;
 
+  const contactValid = useMemo(() => (
+    !validateName(contactName)
+    && !validateEmail(contactEmail)
+    && !validatePhone(contactPhone)
+    && (!bookingRequiresAddress || !!serviceAddress.trim())
+    && (!isBusiness || (businessName.trim().length > 0 && propertyType.length > 0))
+  ), [contactName, contactEmail, contactPhone, serviceAddress, isBusiness, businessName, propertyType]);
+
+  const formattedServiceAddress = useMemo(() => {
+    if (!serviceAddress.trim()) return '';
+    return unitNumber ? `${serviceAddress}, Unit ${unitNumber}` : serviceAddress;
+  }, [serviceAddress, unitNumber]);
+
   /* per-clean values kept for display purposes */
-  const perCleanAfterDiscount = perCleanAfterFrequencyDiscount;
-  const perCleanTotal = perCleanAfterDiscount * (1 + GST_RATE);
+  const perVisitAfterDiscount = perVisitAfterFrequencyDiscount;
+  const perVisitTotal = perVisitAfterDiscount * (1 + GST_RATE);
 
   /* ── Fetch month availability from API (or local mock in template mode) ── */
   const fetchMonthAvailability = useCallback(async (year: number, month: number) => {
@@ -276,7 +291,7 @@ export default function BookPage() {
         return;
       }
 
-      const url = `/api/availability/month?year=${year}&month=${month + 1}&service=${serviceKey}&homeSize=${selectedSize}`;
+      const url = `/api/availability/month?year=${year}&month=${month + 1}&service=${serviceKey}&sizeKey=${selectedSize}`;
       const res = await fetch(url);
       const ct = res.headers.get('content-type') ?? '';
       if (res.ok && ct.includes('application/json')) {
@@ -367,7 +382,7 @@ export default function BookPage() {
         }]);
       }
     }
-    if (prefilledNotes) setJobNotes(prefilledNotes);
+    if (prefilledNotes) setSessionNotes(prefilledNotes);
 
     // ── Fetch quote record for name/email/phone/address/promo/size ────────────
     fetch(`/api/quotes/${quoteId}`)
@@ -391,7 +406,7 @@ export default function BookPage() {
           promoCode?: string | null;
           preferred_date?: string | null;
           preferred_time?: string | null;
-          home_size?: string | null;
+          size_key?: string | null;
           notes?: string | null;
           custom_services?: string | null;
         };
@@ -402,7 +417,7 @@ export default function BookPage() {
         if (d.unit_number)     setUnitNumber(d.unit_number);
 
         // Prefill home size — URL param 'size' takes precedence, but API fills it if missing
-        if (d.home_size) setSelectedSize(d.home_size);
+        if (d.size_key) setSelectedSize(d.size_key);
 
         // Prefill custom services
         if (d.custom_services) {
@@ -428,7 +443,7 @@ export default function BookPage() {
         }
 
         // Prefill notes from API — only if URL params didn't already provide them
-        if (!prefilledNotes && d.notes) setJobNotes(d.notes);
+        if (!prefilledNotes && d.notes) setSessionNotes(d.notes);
 
         // Auto-apply promo from URL param (takes precedence over quote record)
         const promo = prefilledPromo || d.promoCode || null;
@@ -482,7 +497,7 @@ export default function BookPage() {
     const dateStr = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
     setDayLoading(prev => ({ ...prev, [day]: true }));
     try {
-      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'tier1' : selectedPkg.toLowerCase();
       const fallback = getMockDaySlots(serviceKey, selectedSize);
 
       if (!bookingApiEnabled) {
@@ -490,7 +505,7 @@ export default function BookPage() {
         return;
       }
 
-      const url = `/api/availability?date=${dateStr}&service=${serviceKey}&homeSize=${selectedSize}`;
+      const url = `/api/availability?date=${dateStr}&service=${serviceKey}&sizeKey=${selectedSize}`;
       const res = await fetch(url);
       const ct = res.headers.get('content-type') ?? '';
       if (res.ok && ct.includes('application/json')) {
@@ -500,7 +515,7 @@ export default function BookPage() {
         setDaySlots(prev => ({ ...prev, [day]: fallback }));
       }
     } catch {
-      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'tier1' : selectedPkg.toLowerCase();
       setDaySlots(prev => ({ ...prev, [day]: getMockDaySlots(serviceKey, selectedSize) }));
     } finally {
       setDayLoading(prev => ({ ...prev, [day]: false }));
@@ -527,7 +542,7 @@ export default function BookPage() {
         body: JSON.stringify({
           code: promoCode.trim(),
           service: selectedPkg,
-          basePrice: perCleanSubtotal,
+          basePrice: perVisitSubtotal,
         }),
       });
       const data = await res.json() as PromoResponse;
@@ -540,85 +555,83 @@ export default function BookPage() {
     }
   };
 
-  /* ── Continue to Checkout: call create-intent ── */
-  const handleContinueToCheckout = async () => {
+  const buildCheckoutPayload = useCallback(() => {
+    const primarySelection = selections[0];
+    if (!primarySelection?.time) return null;
+    const dateStr = `${primarySelection.year}-${String(primarySelection.month + 1).padStart(2, '0')}-${String(primarySelection.day).padStart(2, '0')}`;
+    const addOnsPayload = applicableAddOns
+      .filter(a => selectedAddOns[a.id]?.on)
+      .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
+    return {
+      dateStr,
+      addOnsPayload,
+      body: {
+        name: contactName,
+        email: contactEmail,
+        phone: contactPhone,
+        service: selectedPkg,
+        sizeKey: selectedSize,
+        date: dateStr,
+        time: primarySelection.time,
+        addOns: addOnsPayload,
+        notes: sessionNotes,
+        promoCode: appliedPromo ?? undefined,
+        frequency,
+        ...(formattedServiceAddress ? { serviceAddress: formattedServiceAddress } : {}),
+        ...(serviceAddressCoords ? { lat: serviceAddressCoords.lat, lng: serviceAddressCoords.lng } : {}),
+        source: bookingSource,
+        utmSource,
+        utmMedium,
+        utmCampaign,
+        sourceEmailId,
+        ...(isBusiness && {
+          mode: 'business' as const,
+          business_name: businessName,
+          property_type: propertyType,
+        }),
+      },
+    };
+  }, [
+    selections, applicableAddOns, selectedAddOns, contactName, contactEmail, contactPhone,
+    selectedPkg, selectedSize, sessionNotes, appliedPromo, frequency, formattedServiceAddress,
+    serviceAddressCoords, bookingSource, utmSource, utmMedium, utmCampaign, sourceEmailId,
+    isBusiness, businessName, propertyType,
+  ]);
+
+  /* ── Bootstrap PaymentIntent as soon as step 3 opens (no contact required) ── */
+  const bootstrapPaymentIntent = async () => {
     setIntentError(null);
     setIntentLoading(true);
 
-    const primarySelection = selections[0];
-    if (!primarySelection || !primarySelection.time) {
+    const built = buildCheckoutPayload();
+    if (!built) {
       setIntentError('Please select a date and time before continuing.');
       setIntentLoading(false);
       return;
     }
 
-    // Guard: contact info must be filled before sending to backend
-    if (validateName(contactName) || validateEmail(contactEmail) || validatePhone(contactPhone)) {
-      setIntentError('Please fill in your contact information.');
-      setIntentLoading(false);
-      return;
-    }
-
-    // Guard: business fields required in business mode
-    if (isBusiness && !businessName.trim()) {
-      setIntentError('Please enter your business name.');
-      setIntentLoading(false);
-      return;
-    }
-    if (isBusiness && !propertyType) {
-      setIntentError('Please select a property type.');
-      setIntentLoading(false);
-      return;
-    }
-
-    // Get Turnstile token (invisible widget — usually instant)
-    let turnstileToken = '';
-    try {
-      turnstileToken = await getTurnstileToken();
-    } catch {
-      // Token fetch timed out — proceed without it; backend will soft-fail gracefully
-      console.warn('[turnstile] token timeout — proceeding without');
-    }
-
-    const dateStr = `${primarySelection.year}-${String(primarySelection.month + 1).padStart(2,'0')}-${String(primarySelection.day).padStart(2,'0')}`;
-    const timeStr = primarySelection.time;
-
-    const addOnsPayload = applicableAddOns
-      .filter(a => selectedAddOns[a.id]?.on)
-      .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
+    const { body } = built;
+    const bootstrapBody = {
+      service: body.service,
+      sizeKey: body.sizeKey,
+      date: body.date,
+      time: body.time,
+      addOns: body.addOns,
+      notes: body.notes,
+      promoCode: body.promoCode,
+      frequency: body.frequency,
+      ...(isBusiness && {
+        mode: 'business' as const,
+        business_name: businessName,
+        property_type: propertyType,
+      }),
+    };
 
     try {
       const res = await fetch('/api/bookings/create-intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: contactName,
-          email: contactEmail,
-          phone: contactPhone,
-          service: selectedPkg,
-          homeSize: selectedSize,
-          date: dateStr,
-          time: timeStr,
-          addOns: addOnsPayload,
-          notes: jobNotes,
-          promoCode: appliedPromo ?? undefined,
-          frequency,
-          serviceAddress: unitNumber ? `${serviceAddress}${unitNumber ? ', Unit ' + unitNumber : ''}` : serviceAddress,
-          ...(serviceAddressCoords ? { lat: serviceAddressCoords.lat, lng: serviceAddressCoords.lng } : {}),
-          turnstileToken,
-          // Source attribution
-          source: bookingSource,
-          utmSource,
-          utmMedium,
-          utmCampaign,
-          sourceEmailId,
-          // Business mode fields
-          ...(isBusiness && {
-            mode: 'business',
-            business_name: businessName,
-            property_type: propertyType,
-          }),
-        }),
+        body: JSON.stringify(bootstrapBody),
       });
 
       const data = await res.json() as CreateIntentResponse & { error?: string };
@@ -641,12 +654,9 @@ export default function BookPage() {
         setClientSecret(data.clientSecret);
         if (data.customerSessionClientSecret) setCustomerSessionClientSecret(data.customerSessionClientSecret);
       }
-      clarityEvent('booking_details_complete');
-      clarityTag('booking_package', selectedPkg);
-      clarityTag('booking_size', selectedSize);
+
+      setCheckoutInitialized(true);
       clarityUpgrade('booking_checkout');
-      tracker.bookingStep(2, { service: selectedPkg, size: selectedSize });
-      setStep(3);
     } catch {
       setIntentError('Network error. Please check your connection and try again.');
     } finally {
@@ -654,51 +664,70 @@ export default function BookPage() {
     }
   };
 
+  const syncPaymentIntent = useCallback(async (): Promise<boolean> => {
+    if (!paymentIntentId || isFreeBooking) return true;
+    const built = buildCheckoutPayload();
+    if (!built) return false;
 
-  /* ── Auto-create intent: fires when step=3 AND all required fields are valid ── */
-  const formReady = step === 3
+    let turnstileToken = '';
+    try {
+      turnstileToken = await getTurnstileToken();
+    } catch {
+      console.warn('[turnstile] token timeout — proceeding without');
+    }
+
+    try {
+      const res = await fetch('/api/bookings/update-intent', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentIntentId,
+          turnstileToken,
+          ...built.body,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        setIntentError(data.error ?? 'Could not update booking details.');
+        return false;
+      }
+      return true;
+    } catch {
+      setIntentError('Network error while preparing payment.');
+      return false;
+    }
+  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload, getTurnstileToken]);
+
+  const intentBootstrapReady = step === 3
     && !isCustom
-    && !clientSecret
-    && !paymentIntentId
-    && !isFreeBooking
+    && !checkoutInitialized
     && !intentLoading
     && !intentError
     && selections.length > 0
-    && !!selections[0]?.time
-    && !validateName(contactName)
-    && !validateEmail(contactEmail)
-    && !validatePhone(contactPhone)
-    && !!serviceAddress
-    && (!isBusiness || (businessName.trim().length > 0 && propertyType.length > 0));
+    && !!selections[0]?.time;
 
   useEffect(() => {
-    if (formReady) {
-      handleContinueToCheckout();
+    if (intentBootstrapReady) {
+      bootstrapPaymentIntent();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formReady]);
+  }, [intentBootstrapReady]);
 
-  /* ── Update intent amount when cart changes on step 3 ── */
   useEffect(() => {
-    if (step !== 3 || !paymentIntentId || isFreeBooking) return;
-    const addOnsPayload = applicableAddOns
-      .filter(a => selectedAddOns[a.id]?.on)
-      .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
+    if (step !== 3) {
+      setCheckoutInitialized(false);
+      setClientSecret(null);
+      setPaymentIntentId(null);
+      setCustomerSessionClientSecret(null);
+    }
+  }, [step]);
 
-    fetch('/api/bookings/update-intent', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        paymentIntentId,
-        service: selectedPkg,
-        homeSize: selectedSize,
-        addOns: addOnsPayload,
-        promoCode: appliedPromo ?? undefined,
-        frequency,
-      }),
-    }).catch(console.error);
+  /* ── Update intent when cart or contact changes on step 3 ── */
+  useEffect(() => {
+    if (step !== 3 || !paymentIntentId || isFreeBooking || !checkoutInitialized) return;
+    syncPaymentIntent().catch(console.error);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAddOns, appliedPromo, frequency]);
+  }, [selectedAddOns, appliedPromo, frequency, contactName, contactEmail, contactPhone, formattedServiceAddress, sessionNotes]);
 
 
   /* ── Build booking success state for /booking-success redirect ── */
@@ -779,11 +808,11 @@ export default function BookPage() {
           email: contactEmail,
           phone: contactPhone,
           service: selectedPkg,
-          homeSize: selectedSize,
+          sizeKey: selectedSize,
           date: dateStr,
           time: primarySelection.time,
           addOns: addOnsPayload,
-          notes: jobNotes,
+          notes: sessionNotes,
           promoCode: appliedPromo ?? undefined,
           frequency,
           serviceAddress: unitNumber ? `${serviceAddress}, Unit ${unitNumber}` : serviceAddress,
@@ -1228,10 +1257,10 @@ export default function BookPage() {
                             margin: '0 0 10px 0',
                             lineHeight: 1.6,
                           }}>
-                            {SERVICE_DESC[expandedPkg]}
+                            {SERVICE_DESC[expandedPkg as Pkg]}
                           </p>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                            {(SERVICE_INCLUDES[expandedPkg] || []).map((item: string) => (
+                            {(SERVICE_INCLUDES[expandedPkg as Pkg] || []).map((item: string) => (
                               <span key={item} style={{
                                 fontFamily: fonts.body,
                                 fontSize: '11px',
@@ -1587,7 +1616,7 @@ export default function BookPage() {
                     unitNumber={unitNumber}
                     onUnitChange={setUnitNumber}
                     customServices={customServices}
-                    homeSize={selectedSize}
+                    sizeKey={selectedSize}
                     pendingDropFiles={pendingDropFiles}
                     onDropFilesConsumed={() => setPendingDropFiles([])}
                     selectedDate={selections[0] ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day}, ${selections[0].year}` : undefined}
@@ -1726,7 +1755,8 @@ export default function BookPage() {
                     {phoneError && <div style={fieldError}>{phoneError}</div>}
                   </div>
 
-                  {/* Address row: autocomplete + unit number */}
+                  {/* Address row — optional per tenant (VITE_BOOKING_REQUIRES_ADDRESS) */}
+                  {bookingRequiresAddress && (
                   <div className="book-address-row">
                     <div style={{ flex: 1 }}>
                       <AddressAutocomplete
@@ -1746,6 +1776,7 @@ export default function BookPage() {
                       />
                     </div>
                   </div>
+                  )}
 
                 </div>
 
@@ -1918,17 +1949,17 @@ export default function BookPage() {
                   <div style={{ position: 'relative' }}>
                     <textarea
                       placeholder={site.booking.checkout.notesPlaceholder}
-                      value={jobNotes}
-                      onChange={e => setJobNotes(e.target.value.slice(0, 120))}
+                      value={sessionNotes}
+                      onChange={e => setSessionNotes(e.target.value.slice(0, 120))}
                       style={{ ...textareaStyle, paddingBottom: '28px', width: '100%', resize: 'none' }}
                     />
                     <div style={{
                       position: 'absolute', bottom: '8px', right: '12px',
                       fontFamily: fonts.body, fontSize: '11px',
-                      color: jobNotes.length >= 110 ? colors.gold : colors.warmGray,
+                      color: sessionNotes.length >= 110 ? colors.gold : colors.warmGray,
                       opacity: 0.8,
                     }}>
-                      {jobNotes.length}/120
+                      {sessionNotes.length}/120
                     </div>
                   </div>
                 </div>
@@ -2019,14 +2050,14 @@ export default function BookPage() {
                     {freeError && (
                       <div style={{ color: '#df1b41', fontFamily: fonts.body, fontSize: '14px', marginBottom: '12px' }}>{freeError}</div>
                     )}
-                    <Button variant="primary" fullWidth onClick={handleFreeBooking}>
+                    <Button variant="primary" fullWidth onClick={handleFreeBooking} disabled={!contactValid || freeLoading}>
                       {freeLoading ? 'Confirming…' : 'Confirm Free Booking'}
                     </Button>
                   </div>
                 )}
 
-                {/* Stripe Payment Element — only when clientSecret present */}
-                {!isFreeBooking && clientSecret && (
+                {/* Stripe Payment Element — loads as soon as step 3 opens */}
+                {!isFreeBooking && (clientSecret || intentLoading) && (
                   <div style={{
                     background: colors.white,
                     border: `1px solid ${colors.stone}`,
@@ -2042,7 +2073,7 @@ export default function BookPage() {
                       <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>Secured by Stripe</span>
                     </div>
 
-                    {(hasStripeKey || publishableKey) ? (
+                    {clientSecret && (hasStripeKey || publishableKey) ? (
                     <Elements
                       stripe={elementsStripe}
                       options={{
@@ -2055,6 +2086,8 @@ export default function BookPage() {
                         returnUrl={window.location.origin + '/book/confirmation'}
                         total={grandTotal}
                         frequencyLabel={frequencyDiscounts[frequency].label}
+                        canSubmit={contactValid}
+                        onBeforeConfirm={syncPaymentIntent}
                         onSuccess={() => {
                           handlePaymentSuccess();
                         }}
@@ -2063,10 +2096,19 @@ export default function BookPage() {
                         }}
                       />
                     </Elements>
-                    ) : (
+                    ) : clientSecret ? (
                       <p style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray, lineHeight: 1.6, margin: 0 }}>
                         Stripe is not configured for local preview. Copy <code>.env.example</code> to <code>.env</code> and set <code>VITE_STRIPE_PUBLISHABLE_KEY</code> to enable the payment form.
                       </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '16px 0' }}>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
+                          <circle cx="12" cy="12" r="10" stroke={colors.stone} strokeWidth="3"/>
+                          <path d="M12 2a10 10 0 0 1 10 10" stroke={colors.sageGreen} strokeWidth="3" strokeLinecap="round"/>
+                        </svg>
+                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                        <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>Loading payment form…</span>
+                      </div>
                     )}
                     {paymentError && (
                       <div style={{
@@ -2103,40 +2145,6 @@ export default function BookPage() {
                         onSelect={(r: AddressResult) => { setBillingAddress(r.formatted); }}
                         style={{ ...inputStyle, marginTop: '12px' }}
                       />
-                    )}
-                  </div>
-                )}
-
-                {/* Payment loading state */}
-                {!isFreeBooking && !clientSecret && !paymentIntentId && (
-                  <div style={{
-                    background: colors.white,
-                    border: `1px solid ${colors.stone}`,
-                    borderRadius: '8px',
-                    padding: '32px 24px',
-                    marginBottom: '32px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '12px',
-                  }}>
-                    {intentLoading ? (
-                      <>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
-                          <circle cx="12" cy="12" r="10" stroke={colors.stone} strokeWidth="3"/>
-                          <path d="M12 2a10 10 0 0 1 10 10" stroke={colors.sageGreen} strokeWidth="3" strokeLinecap="round"/>
-                        </svg>
-                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                        <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>Loading payment form…</span>
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
-                          {(!validateName(contactName) && !validateEmail(contactEmail) && !validatePhone(contactPhone) && serviceAddress)
-                            ? 'Preparing payment…'
-                            : 'Complete your info above to load payment.'}
-                        </span>
-                      </>
                     )}
                   </div>
                 )}
@@ -2199,14 +2207,14 @@ export default function BookPage() {
               </div>
               )}
               <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '8px', lineHeight: 1.5, fontStyle: 'italic' }}>
-                {isCustom || selectedPkg === 'Custom' ? site.booking.checkout.customQuoteSidebar : SERVICE_DESC[selectedPkg]}
+                {isCustom || selectedPkg === 'Custom' ? site.booking.checkout.customQuoteSidebar : SERVICE_DESC[selectedPkg as Pkg]}
               </div>
               {step === 3 && (
                 <div style={{ marginTop: '10px', borderTop: `1px solid ${colors.stone}`, paddingTop: '10px' }}>
                   <div style={{ fontFamily: fonts.body, fontWeight: 500, fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: colors.warmGray, marginBottom: '6px' }}>
                     INCLUDED
                   </div>
-                  {(SERVICE_INCLUDES[selectedPkg] || []).map((item, idx) => (
+                  {(SERVICE_INCLUDES[selectedPkg as Pkg] || []).map((item: string, idx: number) => (
                     <div key={idx} style={{ fontFamily: fonts.body, fontSize: '12px', color: colors.charcoal, display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '4px', lineHeight: 1.4 }}>
                       <span style={{ color: colors.sageGreen, fontSize: '10px', marginTop: '3px', flexShrink: 0 }}>✓</span>
                       {item}
@@ -2314,7 +2322,7 @@ export default function BookPage() {
                   <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
                     {quotePriceOverrideDollars != null ? 'Subtotal' : (frequency === 'one-time' ? 'Subtotal' : `Per visit`)}
                   </span>
-                  <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>${(quotePriceOverrideDollars != null ? subtotalAfterAllDiscounts : perCleanSubtotal).toFixed(2)}</span>
+                  <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>${(quotePriceOverrideDollars != null ? subtotalAfterAllDiscounts : perVisitSubtotal).toFixed(2)}</span>
                 </div>
                 {discountAmount > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
@@ -2339,10 +2347,10 @@ export default function BookPage() {
                 {frequency !== 'one-time' && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', paddingTop: '8px', borderTop: `1px solid ${colors.stone}` }}>
                     <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>
-                      {totalCleans} visit{totalCleans !== 1 ? 's' : ''} this month
+                      {totalVisits} visit{totalVisits !== 1 ? 's' : ''} this month
                     </span>
                     <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>
-                      ${perCleanTotal.toFixed(2)} each
+                      ${perVisitTotal.toFixed(2)} each
                     </span>
                   </div>
                 )}

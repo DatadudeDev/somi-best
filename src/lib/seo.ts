@@ -43,7 +43,7 @@ const LOCAL_BUSINESS: Record<string, unknown> = {
   '@id': `${BASE_URL}/#business`,
   name: SITE_NAME,
   url: BASE_URL,
-  logo: `${BASE_URL}${images.logoCleaningCompany}`,
+  logo: `${BASE_URL}${images.logoFull}`,
   image: DEFAULT_OG,
   description: site.footer.tagline,
   telephone: site.contact.phoneTel,

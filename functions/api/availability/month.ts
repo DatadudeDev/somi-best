@@ -1,6 +1,6 @@
 /**
  * functions/api/availability/month.ts
- * GET /api/availability/month?year=&month=&service=&homeSize=
+ * GET /api/availability/month?year=&month=&service=&sizeKey=
  *
  * Calendar view: per-day slot summary for a whole month in one pass.
  * Response: { year, month, days: { "YYYY-MM-DD": { slotCount, available, blocked, bookingCount } } }
@@ -32,8 +32,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const url = new URL(context.request.url);
   const yearParam = url.searchParams.get('year');
   const monthParam = url.searchParams.get('month');
-  const service = url.searchParams.get('service') ?? 'essential';
-  const homeSize = url.searchParams.get('homeSize') ?? 's2';
+  const service = url.searchParams.get('service') ?? 'tier1';
+  const sizeKey = url.searchParams.get('sizeKey') ?? 's2';
 
   if (!yearParam || !monthParam) return jsonError('year and month are required');
   const year = parseInt(yearParam, 10);
@@ -86,7 +86,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const currentHour = currentHourInTimezone(config.timezone);
 
   const capacity = await getCapacityCap(env.DB);
-  const duration = getDuration(service, homeSize);
+  const duration = getDuration(service, sizeKey);
   const startHours = getAvailableStartHours(duration);
 
   const days: Record<string, DaySummary> = {};

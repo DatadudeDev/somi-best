@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { site } from '../../config/site';
 import {
-  HOME_SERVICE_TIERS,
+  SERVICE_TIERS,
   formatServiceMinutes,
   serviceBookPath,
 } from '../../data/pricing';
-import { HOME_CLEANING_SECTION_ID } from '../../lib/home-services-nav';
+import { SERVICES_SECTION_ID } from '../../lib/services-nav';
 import AnimatedSection from '../ui/AnimatedSection';
 import '../../styles/services-pricing.css';
 
@@ -16,7 +16,7 @@ export default function HomeServicesSection() {
   const [selected, setSelected] = useState(DEFAULT_SELECTED);
 
   return (
-    <section id={HOME_CLEANING_SECTION_ID} className="services-pricing">
+    <section id={SERVICES_SECTION_ID} className="services-pricing">
       <AnimatedSection>
         <div className="services-pricing__head">
           <div className="services-pricing__eyebrow">{site.services.sectionLabel}</div>
@@ -25,7 +25,7 @@ export default function HomeServicesSection() {
         </div>
 
         <div className="services-pricing__grid" role="list">
-          {HOME_SERVICE_TIERS.map(tier => {
+          {SERVICE_TIERS.map(tier => {
             const isSelected = selected === tier.name;
             return (
               <article

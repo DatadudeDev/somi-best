@@ -46,15 +46,15 @@ export const site = {
     sectionLabel: 'Recovery Protocols',
     headline: 'Pick your protocol.',
     subheadline: 'Four tiers. One mission — get you back to peak output faster.',
-    bedroomLabel: 'Session tier',
+    tierLabel: 'Session tier',
     bentoTabs: {
-      residential: 'Individual Recovery',
+      individual: 'Individual Recovery',
       custom: 'Custom Protocols',
       business: 'Team & Corporate',
     },
     headlinePrefix: 'Choose the protocol built for your ',
     swappable: {
-      residential: 'body',
+      individual: 'body',
       custom: 'goals',
       business: 'program',
     },
@@ -111,32 +111,32 @@ export const site = {
     items: [
       {
         name: 'Mobility Ball',
-        scent: '$30',
+        priceLabel: '$30',
         notes: 'Dense rubber ball for precise trigger-point release and fascial decompression',
       },
       {
         name: 'Twin Mobility Ball',
-        scent: '$40',
+        priceLabel: '$40',
         notes: 'Two-sided rolling along the spine, calves, glutes, and thighs',
       },
       {
         name: 'Foam Roller',
-        scent: '$40',
+        priceLabel: '$40',
         notes: 'High-density roller for back, glutes, and quads — broad myofascial release',
       },
       {
         name: 'Power Bottle',
-        scent: '$25',
+        priceLabel: '$25',
         notes: 'Insulated shaker with supplement compartment and stainless mixing ball',
       },
       {
         name: 'Trainer Bands',
-        scent: '$50',
+        priceLabel: '$50',
         notes: 'Three resistance levels for activation, mobility, and at-home rehab',
       },
       {
         name: 'Personalized Protocol',
-        scent: '$20',
+        priceLabel: '$20',
         notes: 'Six-week take-home plan — daily recovery work on your schedule',
       },
     ],

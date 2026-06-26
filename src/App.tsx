@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { homeSectionTo } from './lib/home-services-nav';
+import { siteSectionTo } from './lib/services-nav';
 import { lazy, Suspense } from 'react';
 
 const Layout = lazy(() => import('./components/layout/Layout.tsx'));
@@ -40,10 +40,10 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
-            <Route path="/services" element={<Navigate to={homeSectionTo('services')} replace />} />
-            <Route path="/pricing" element={<Navigate to={homeSectionTo('services')} replace />} />
-            <Route path="/custom-services" element={<Navigate to={homeSectionTo('services')} replace />} />
-            <Route path="/business-services" element={<Navigate to={homeSectionTo('services')} replace />} />
+            <Route path="/services" element={<Navigate to={siteSectionTo('services')} replace />} />
+            <Route path="/pricing" element={<Navigate to={siteSectionTo('services')} replace />} />
+            <Route path="/custom-services" element={<Navigate to={siteSectionTo('services')} replace />} />
+            <Route path="/business-services" element={<Navigate to={siteSectionTo('services')} replace />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/for-business" element={<Navigate to="/contact" replace />} />
             <Route path="/book" element={<Book />} />

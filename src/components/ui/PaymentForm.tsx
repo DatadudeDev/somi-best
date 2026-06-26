@@ -9,6 +9,10 @@ interface PaymentFormProps {
   onSuccess?: () => void;
   /** Called when confirmPayment fails */
   onError?: (message: string) => void;
+  /** Sync contact + metadata on the PaymentIntent before charging */
+  onBeforeConfirm?: () => Promise<boolean>;
+  /** When false, pay button stays disabled even after Stripe loads */
+  canSubmit?: boolean;
   /** Grand total in dollars — displayed on the button */
   total: number;
   /** Label for the frequency type, e.g. "Weekly Booking" */
@@ -21,6 +25,8 @@ export default function PaymentForm({
   returnUrl,
   onSuccess,
   onError,
+  onBeforeConfirm,
+  canSubmit = true,
   total,
   frequencyLabel,
   isSubmitting: parentSubmitting = false,
@@ -32,10 +38,18 @@ export default function PaymentForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!stripe || !elements) return;
+    if (!stripe || !elements || !canSubmit) return;
 
     setLoading(true);
     setErrorMessage(null);
+
+    if (onBeforeConfirm) {
+      const ok = await onBeforeConfirm();
+      if (!ok) {
+        setLoading(false);
+        return;
+      }
+    }
 
     const { error } = await stripe.confirmPayment({
       elements,
@@ -55,7 +69,7 @@ export default function PaymentForm({
     }
   };
 
-  const isDisabled = loading || parentSubmitting || !stripe || !elements;
+  const isDisabled = loading || parentSubmitting || !stripe || !elements || !canSubmit;
 
   return (
     <form onSubmit={handleSubmit}>
