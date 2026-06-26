@@ -45,7 +45,7 @@ export const site = {
   services: {
     sectionLabel: 'Recovery Protocols',
     headline: 'Pick your protocol.',
-    subheadline: 'Three tiers. One mission — get you back to peak output faster.',
+    subheadline: 'Four tiers. One mission — get you back to peak output faster.',
     bedroomLabel: 'Session tier',
     bentoTabs: {
       residential: 'Individual Recovery',
@@ -89,7 +89,7 @@ export const site = {
       {
         name: 'Sarah K.',
         neighborhood: 'Marathon Runner',
-        service: 'Elite Recovery',
+        service: 'Ultimate Protocol',
         quote:
           'After my last ultra, BEST had me race-ready in 72 hours. The team knows anatomy, knows athletics, and doesn\'t waste a single minute of your session.',
       },
@@ -107,12 +107,38 @@ export const site = {
     label: 'Performance Stack',
     headline: 'Recovery doesn\'t stop when you leave.',
     body:
-      'Take the BEST protocol home. Medical-grade tools and supplements curated for active recovery — the same gear our therapists trust in-session.',
+      'Take the BEST protocol home. Professional recovery tools curated for active bodies — the same gear our therapists trust in-session and recommend between visits.',
     items: [
-      { name: 'Normatec Boots', scent: 'Compression', notes: 'Dynamic air compression for legs & hips' },
-      { name: 'Hypervolt Pro', scent: 'Percussion', notes: 'Deep-tissue percussion therapy device' },
-      { name: 'CBD Recovery Balm', scent: 'Topical', notes: 'Targeted relief for sore muscles & joints' },
-      { name: 'Electrolyte Protocol', scent: 'Nutrition', notes: 'Replenishment formula for post-session recovery' },
+      {
+        name: 'Mobility Ball',
+        scent: '$30',
+        notes: 'Dense rubber ball for precise trigger-point release and fascial decompression',
+      },
+      {
+        name: 'Twin Mobility Ball',
+        scent: '$40',
+        notes: 'Two-sided rolling along the spine, calves, glutes, and thighs',
+      },
+      {
+        name: 'Foam Roller',
+        scent: '$40',
+        notes: 'High-density roller for back, glutes, and quads — broad myofascial release',
+      },
+      {
+        name: 'Power Bottle',
+        scent: '$25',
+        notes: 'Insulated shaker with supplement compartment and stainless mixing ball',
+      },
+      {
+        name: 'Trainer Bands',
+        scent: '$50',
+        notes: 'Three resistance levels for activation, mobility, and at-home rehab',
+      },
+      {
+        name: 'Personalized Protocol',
+        scent: '$20',
+        notes: 'Six-week take-home plan — daily recovery work on your schedule',
+      },
     ],
     footnote: 'Available in-clinic or shipped to your door.',
   },

@@ -37,7 +37,7 @@ const FAQ_SECTIONS: { title: string; items: FAQItem[] }[] = [
     items: [
       {
         q: 'How is pricing calculated?',
-        a: 'Pricing is based on your protocol (Foundation, Performance, Elite Recovery) and athlete tier. You see the exact price before you confirm — no surprises.',
+        a: 'Pricing is based on your protocol (Foundation, Performance, Extended, or Ultimate) and athlete tier. You see the exact price before you confirm — no surprises.',
       },
       {
         q: 'Do you offer program discounts?',
@@ -61,8 +61,8 @@ const FAQ_SECTIONS: { title: string; items: FAQItem[] }[] = [
         a: '45 minutes of targeted soft-tissue work, mobility protocol, and a recovery assessment. See our Protocols section for the full breakdown.',
       },
       {
-        q: 'What\'s the difference between Performance and Elite Recovery?',
-        a: 'Performance adds percussion, compression therapy, and sport-specific focus. Elite Recovery is a full 90-minute deep protocol with cryo boost and a take-home plan.',
+        q: 'What\'s the difference between Performance, Extended, and Ultimate?',
+        a: 'Performance adds percussion, compression therapy, and sport-specific focus over Foundation. Extended is a 90-minute session with deeper bodywork coverage. Ultimate is our flagship 120-minute full-body protocol with a personalized take-home recovery plan.',
       },
       {
         q: 'Do I need to be an athlete?',
@@ -189,7 +189,7 @@ export default function HelpPage() {
           {[
             { emoji: '⚡', title: 'Book Recovery', desc: 'Schedule online in 2 minutes', href: '/book' },
             { emoji: '✉️', title: 'Contact Us', desc: 'Send us a message', href: '/contact' },
-            { emoji: '💪', title: 'View Protocols', desc: 'Foundation to Elite Recovery', href: '/#services' },
+            { emoji: '💪', title: 'View Protocols', desc: 'Foundation to Ultimate', href: '/#services' },
           ].map(item => (
             <Link
               key={item.href}

@@ -10,7 +10,7 @@ import { HOME_CLEANING_SECTION_ID } from '../../lib/home-services-nav';
 import AnimatedSection from '../ui/AnimatedSection';
 import '../../styles/services-pricing.css';
 
-const DEFAULT_SELECTED = 'Premium';
+const DEFAULT_SELECTED = 'Extended';
 
 export default function HomeServicesSection() {
   const [selected, setSelected] = useState(DEFAULT_SELECTED);
@@ -42,6 +42,9 @@ export default function HomeServicesSection() {
                 }}
                 tabIndex={0}
               >
+                {tier.bestValue && (
+                  <span className="services-pricing__ribbon services-pricing__ribbon--value">Best Value</span>
+                )}
                 {tier.popular && <span className="services-pricing__ribbon">Popular</span>}
                 <h3 className="services-pricing__name">{tier.name}</h3>
                 <div className="services-pricing__price-row">

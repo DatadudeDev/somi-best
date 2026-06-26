@@ -80,7 +80,7 @@ const FAQ_SCHEMA: Record<string, unknown> = {
       name: 'How much does a recovery session cost?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Foundation sessions start at $89 for 45 minutes. Performance and Elite Recovery protocols are $129 and $179. See our homepage for full tier details.',
+        text: 'Foundation sessions start at $79 for 45 minutes. Performance, Extended, and Ultimate protocols are $119, $159, and $209. See our homepage for full tier details.',
       },
     },
     {
@@ -122,7 +122,7 @@ export const seoMeta: Record<string, SEOMeta> = {
 
   pricing: {
     title: `Service Pricing — ${site.name}`,
-    description: 'Recovery protocol pricing — Foundation, Performance, and Elite Recovery tiers for athletes at every level.',
+    description: 'Recovery protocol pricing — Foundation, Performance, Extended, and Ultimate tiers for athletes at every level.',
     canonical: `${BASE_URL}/`,
     ogImage: DEFAULT_OG,
     jsonLd: [{ '@context': 'https://schema.org', '@type': 'Service', name: 'Active Recovery Therapy', provider: LOCAL_BUSINESS }],

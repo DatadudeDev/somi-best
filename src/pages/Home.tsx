@@ -166,7 +166,7 @@ export default function HomePage() {
             {site.hero.subheadline}
           </p>
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap', width: '100%' }}>
-            <Button variant="primary" size="large" href="/book?pkg=Signature&size=s1">
+            <Button variant="primary" size="large" href="/book?pkg=Premier&size=s1">
               {site.hero.primaryCta}
             </Button>
             <Button variant="outlineCream" href="/contact">
@@ -516,7 +516,7 @@ export default function HomePage() {
               <span style={{ display: 'block' }}>{site.finalCta.line1}</span>
               <span style={{ display: 'block', marginLeft: 'clamp(1.25rem, 5vw, 3rem)' }}>{site.finalCta.line2}</span>
             </h2>
-            <Button variant="primary" size="large" href="/book?pkg=Signature&size=s1">
+            <Button variant="primary" size="large" href="/book?pkg=Premier&size=s1">
               {site.finalCta.button}
             </Button>
           </div>

@@ -19,51 +19,45 @@ const iconProps = {
 };
 
 export const ADDON_ICONS: Record<string, ReactNode> = {
-  fridge: (
+  'mobility-ball': (
     <svg viewBox="0 0 24 24" {...iconProps}>
-      <path d="M14 14.76V3.5a2 2 0 00-4 0v11.26a4 4 0 104 0z" />
-      <line x1="10" y1="9" x2="10" y2="2" />
-    </svg>
-  ),
-  oven: (
-    <svg viewBox="0 0 24 24" {...iconProps}>
-      <polygon points="12 2 2 7 12 12 22 7 12 2" />
-      <polyline points="2 17 12 22 22 17" />
-      <polyline points="2 12 12 17 22 12" />
-    </svg>
-  ),
-  windows: (
-    <svg viewBox="0 0 24 24" {...iconProps}>
-      <rect x="8" y="2" width="8" height="4" rx="1" />
-      <path d="M10 6v2l-2 12h8l-2-12V6" />
-    </svg>
-  ),
-  laundry: (
-    <svg viewBox="0 0 24 24" {...iconProps}>
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  ),
-  linen: (
-    <svg viewBox="0 0 24 24" {...iconProps}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  ),
-  pet: (
-    <svg viewBox="0 0 24 24" {...iconProps}>
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  ),
-  walls: (
-    <svg viewBox="0 0 24 24" {...iconProps}>
-      <circle cx="12" cy="12" r="10" />
       <circle cx="12" cy="12" r="6" />
-      <circle cx="12" cy="12" r="2" />
+      <path d="M12 6v12M6 12h12" />
     </svg>
   ),
-  organizing: (
+  'twin-mobility-ball': (
     <svg viewBox="0 0 24 24" {...iconProps}>
-      <path d="M10.5 20.5l-7-7a5 5 0 017-7l7 7a5 5 0 01-7 7z" />
-      <line x1="8" y1="8" x2="16" y2="16" />
+      <circle cx="8" cy="12" r="4" />
+      <circle cx="16" cy="12" r="4" />
+      <path d="M12 8v8" />
+    </svg>
+  ),
+  'foam-roller': (
+    <svg viewBox="0 0 24 24" {...iconProps}>
+      <rect x="4" y="9" width="16" height="6" rx="3" />
+      <ellipse cx="7" cy="12" rx="1.5" ry="3" />
+      <ellipse cx="17" cy="12" rx="1.5" ry="3" />
+    </svg>
+  ),
+  'power-bottle': (
+    <svg viewBox="0 0 24 24" {...iconProps}>
+      <rect x="9" y="3" width="6" height="3" rx="1" />
+      <path d="M8 6h8v14a2 2 0 01-2 2h-4a2 2 0 01-2-2V6z" />
+      <line x1="10" y1="11" x2="14" y2="11" />
+    </svg>
+  ),
+  'trainer-bands': (
+    <svg viewBox="0 0 24 24" {...iconProps}>
+      <path d="M4 10c4-2 8-2 12 0s8 2 12 0" />
+      <path d="M4 14c4 2 8 2 12 0s8-2 12 0" />
+      <path d="M4 18c4 2 8 2 12 0s8-2 12 0" />
+    </svg>
+  ),
+  'personalized-protocol': (
+    <svg viewBox="0 0 24 24" {...iconProps}>
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <path d="M9 12h6M9 16h6" />
     </svg>
   ),
 };

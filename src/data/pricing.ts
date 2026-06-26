@@ -12,63 +12,46 @@ export interface AddOn {
 
 export const addOns: AddOn[] = [
   {
-    id: 'fridge',
-    label: 'Cryo Boost',
-    price: 35,
-    description:
-      'Localized cold therapy for inflamed muscle groups — reduces swelling and speeds recovery after heavy training. Ideal for shoulders, knees, and hot spots that need extra attention post-workout.',
-  },
-  {
-    id: 'oven',
-    label: 'Normatec Compression',
-    price: 45,
-    description:
-      '30-minute dynamic air compression that boosts circulation and flushes metabolic waste from tired legs. Mimics active recovery without loading sore muscles — great after leg day or long endurance sessions.',
-  },
-  {
-    id: 'windows',
-    label: 'CBD Topical Treatment',
-    price: 25,
-    description:
-      'Professional CBD balm massaged into tight areas for targeted muscle and joint relief. Non-psychoactive formula absorbs quickly so you can return to training the same day.',
-  },
-  {
-    id: 'laundry',
-    label: 'Percussion Therapy',
+    id: 'mobility-ball',
+    label: 'Mobility Ball',
     price: 30,
     description:
-      'Deep-tissue percussion to break up adhesions and increase blood flow in dense muscle tissue. Your therapist targets the zones that need it most based on your session goals.',
+      'Professional-grade dense rubber ball for precise trigger-point release and fascial decompression. Targets stubborn knots in feet, hips, and shoulders — the same tool our therapists reach for to restore tissue glide between sessions.',
   },
   {
-    id: 'linen',
-    label: 'Kinesiology Taping',
-    price: 15,
-    unit: 'unit',
-    description:
-      'Athletic tape applied per body zone to support joints and offload stressed tissue during recovery. Priced per area — application included, tape typically lasts 3–5 days.',
-  },
-  {
-    id: 'pet',
-    label: 'Mobility Assessment',
+    id: 'twin-mobility-ball',
+    label: 'Twin Mobility Ball',
     price: 40,
     description:
-      'Movement screen identifying restrictions, imbalances, and compensation patterns that limit performance. Includes a corrective protocol tailored to your sport and current training load.',
+      'Two mobility balls joined on a flexible core for balanced, two-sided rolling along the spine, calves, and IT bands. Keeps pressure even on both sides so you can work deep tissue without fighting for balance.',
   },
   {
-    id: 'walls',
-    label: 'Cupping Therapy',
+    id: 'foam-roller',
+    label: 'Foam Roller',
+    price: 40,
+    description:
+      'High-density foam roller built for broad myofascial release across your back, glutes, and quads. Breaks up adhesive fascia and helps muscle fibers settle back into natural alignment after heavy training.',
+  },
+  {
+    id: 'power-bottle',
+    label: 'Power Bottle',
+    price: 25,
+    description:
+      'Insulated shaker bottle with a built-in supplement compartment and stainless steel mixing ball. One grab-and-go vessel for pre- and post-session nutrition — dishwasher safe for daily use.',
+  },
+  {
+    id: 'trainer-bands',
+    label: 'Trainer Bands',
+    price: 50,
+    description:
+      'A set of three premium resistance bands — light, medium, and heavy — for activation, mobility, and at-home rehab. Ideal for glute work, shoulder stability, and hinge patterns between BEST visits.',
+  },
+  {
+    id: 'personalized-protocol',
+    label: 'Personalized Protocol',
     price: 20,
-    unit: 'unit',
     description:
-      'Myofascial cupping per zone to decompress tight fascia and improve range of motion in stubborn areas. Static or sliding techniques based on what your body needs that day.',
-  },
-  {
-    id: 'organizing',
-    label: 'Recovery Nutrition',
-    price: 55,
-    unit: 'unit',
-    description:
-      'Electrolytes, amino acids, and hydration support to replenish what hard sessions deplete. Take-home pack sized for the 24–48 hours after your visit — priced per pack.',
+      'A six-week take-home recovery plan built from your session — daily mobility, release, and activation work you run on your own schedule. Your therapist notes which tools fit your protocol, so pairing with a foam roller or trainer bands is straightforward when you need them.',
   },
 ];
 
@@ -79,13 +62,14 @@ export const frequencyDiscounts: Record<Frequency, { label: string; discount: nu
   'weekly': { label: 'Weekly', discount: 0.15, description: 'Save 15%' },
 };
 
-export type Pkg = 'Essential' | 'Signature' | 'Deep';
+export type Pkg = 'Essential' | 'Signature' | 'Premier' | 'Ultimate';
 export type SizeKey = 's1' | 's2' | 's3' | 's4';
 
 export const PKG_DISPLAY_NAME: Record<Pkg, string> = {
   Essential: 'Foundation',
   Signature: 'Performance',
-  Deep: 'Elite Recovery',
+  Premier: 'Extended',
+  Ultimate: 'Ultimate',
 };
 
 export interface HomeServiceTier {
@@ -94,6 +78,7 @@ export interface HomeServiceTier {
   price: number;
   minutes: number;
   popular?: boolean;
+  bestValue?: boolean;
   features: string[];
 }
 
@@ -101,8 +86,8 @@ export const HOME_SERVICE_TIERS: HomeServiceTier[] = [
   {
     pkg: 'Essential',
     name: 'Foundation',
-    price: 1,
-    minutes: 45,
+    price: 79,    minutes: 45,
+    bestValue: true,
     features: [
       'Targeted soft-tissue work',
       'Mobility & stretch protocol',
@@ -112,9 +97,8 @@ export const HOME_SERVICE_TIERS: HomeServiceTier[] = [
   {
     pkg: 'Signature',
     name: 'Performance',
-    price: 129,
+    price: 119,
     minutes: 60,
-    popular: true,
     features: [
       'Everything in Foundation',
       'Percussion & compression therapy',
@@ -122,14 +106,26 @@ export const HOME_SERVICE_TIERS: HomeServiceTier[] = [
     ],
   },
   {
-    pkg: 'Deep',
-    name: 'Elite Recovery',
-    price: 179,
+    pkg: 'Premier',
+    name: 'Extended',
+    price: 159,
     minutes: 90,
+    popular: true,
     features: [
       'Everything in Performance',
-      'Full-body deep tissue protocol',
-      'Cryo boost + take-home plan',
+      'Extended bodywork coverage',
+      'Deeper fascial release focus',
+    ],
+  },
+  {
+    pkg: 'Ultimate',
+    name: 'Ultimate',
+    price: 209,
+    minutes: 120,
+    features: [
+      'Everything in Extended',
+      'Full-body comprehensive protocol',
+      'Personalized take-home recovery plan',
     ],
   },
 ];
@@ -149,16 +145,31 @@ export const SIZE_LABELS: Record<SizeKey, string> = {
   s4: 'Pro / Team',
 };
 
-export const PRICES: Record<Pkg, Record<SizeKey, number>> = {
-  Essential: { s1: 1, s2: 104, s3: 129, s4: 181 },
-  Signature: { s1: 129, s2: 161, s3: 209, s4: 274 },
-  Deep:      { s1: 179, s2: 292, s3: 360, s4: 445 },
-};
+const flatPrice = (price: number): Record<SizeKey, number> => ({
+  s1: price,
+  s2: price,
+  s3: price,
+  s4: price,
+});
 
+const flatDuration = (hours: number): Record<SizeKey, number> => ({
+  s1: hours,
+  s2: hours,
+  s3: hours,
+  s4: hours,
+});
+
+export const PRICES: Record<Pkg, Record<SizeKey, number>> = {
+  Essential: flatPrice(79),
+  Signature: flatPrice(119),
+  Premier: flatPrice(159),
+  Ultimate: flatPrice(209),
+};
 export const DURATIONS: Record<Pkg, Record<SizeKey, number>> = {
-  Essential: { s1: 0.75, s2: 1.125, s3: 1.6875, s4: 1.875 },
-  Signature: { s1: 1, s2: 1.333, s3: 1.667, s4: 2 },
-  Deep:      { s1: 1.5, s2: 2.25, s3: 3, s4: 3 },
+  Essential: flatDuration(0.75),
+  Signature: flatDuration(1),
+  Premier: flatDuration(1.5),
+  Ultimate: flatDuration(2),
 };
 
 export interface HostTier {
@@ -178,8 +189,9 @@ function hostTurnoverRowFromResidential(pkg: Pkg): Record<SizeKey, number> {
 
 export const HOST_TURNOVER_PRICES: Record<string, Record<SizeKey, number>> = {
   essentials: hostTurnoverRowFromResidential('Essential'),
-  premium:    hostTurnoverRowFromResidential('Signature'),
-  luxe:       hostTurnoverRowFromResidential('Deep'),
+  premium: hostTurnoverRowFromResidential('Signature'),
+  extended: hostTurnoverRowFromResidential('Premier'),
+  ultimate: hostTurnoverRowFromResidential('Ultimate'),
 };
 
 export function hostTurnoverPrice(tierId: string, size: SizeKey): number {
@@ -215,12 +227,24 @@ export const hostTiers: HostTier[] = [
     ],
   },
   {
-    id: 'luxe',
-    name: 'Elite Program',
-    price: HOST_TURNOVER_PRICES.luxe.s2,
-    icon: '💎',
+    id: 'extended',
+    name: 'Team Extended',
+    price: HOST_TURNOVER_PRICES.extended.s2,
+    icon: '🎯',
     features: [
       'Everything in Team Performance',
+      'Extended session blocks for roster recovery',
+      'Multi-athlete scheduling coordination',
+      'Seasonal load management',
+    ],
+  },
+  {
+    id: 'ultimate',
+    name: 'Ultimate Program',
+    price: HOST_TURNOVER_PRICES.ultimate.s2,
+    icon: '💎',
+    features: [
+      'Everything in Team Extended',
       'Full-season recovery management',
       'Travel & event-day coverage',
       'Performance analytics dashboard',

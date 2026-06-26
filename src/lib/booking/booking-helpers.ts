@@ -3,7 +3,8 @@
  * Pricing/duration lookups, time-slot + calendar + frequency helpers for the
  * booking flow (extracted verbatim from Book.tsx).
  */
-import { PRICES, DURATIONS, type Frequency, type SizeKey } from '../../data/pricing';
+import { PRICES, type Frequency, type SizeKey } from '../../data/pricing';
+import { getDuration as getDurationFromConstants } from './constants';
 import type { SlotSelection } from './booking-types';
 
 /* ── price / duration ── */
@@ -12,7 +13,7 @@ export function getPrice(pkg: string, size: string) {
 }
 
 export function getDuration(pkg: string, size: string) {
-  return DURATIONS[pkg as keyof typeof DURATIONS]?.[size as SizeKey] || 3;
+  return getDurationFromConstants(pkg, size);
 }
 
 import {

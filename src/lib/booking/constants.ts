@@ -11,15 +11,19 @@ type HomeSize = '1br' | '2br' | '3br' | '4br';
 export { HOST_TURNOVER_PRICES, hostTurnoverPrice };
 
 // ── Service display key → ServiceType ─────────────────────────────────────────
-// The booking form uses display strings ("Essential", "Signature", "Deep"); residential "Deep" is branded Luxe Clean in the UI.
+// The booking form uses display strings ("Essential", "Signature", "Premier", "Ultimate").
 // Map them to lowercase canonical keys.
 export const SERVICE_DISPLAY_TO_KEY: Record<string, string> = {
   Essential: 'essential',
   Signature: 'signature',
-  Deep: 'deep',
+  Premier: 'premier',
+  Ultimate: 'ultimate',
+  Deep: 'ultimate',
   essential: 'essential',
   signature: 'signature',
-  deep: 'deep',
+  premier: 'premier',
+  ultimate: 'ultimate',
+  deep: 'ultimate',
 };
 
 // ── Home size key mapping ─────────────────────────────────────────────────────
@@ -45,11 +49,12 @@ export const HOME_SIZE_TYPE_TO_KEY: Record<string, string> = {
 // SERVER pricing source of truth — create-intent reads these via getBasePrice.
 // Mirrors src/data/pricing.ts — BEST Therapeutics recovery protocol prices.
 export const PRICES: Record<string, Record<string, number>> = {
-  essential: { s1: 1, s2: 104, s3: 129, s4: 181 },
-  signature: { s1: 129, s2: 161, s3: 209, s4: 274 },
-  deep: { s1: 179, s2: 292, s3: 360, s4: 445 },
+  essential: { s1: 79, s2: 79, s3: 79, s4: 79 },
+  signature: { s1: 119, s2: 119, s3: 119, s4: 119 },
+  premier: { s1: 159, s2: 159, s3: 159, s4: 159 },
+  ultimate: { s1: 209, s2: 209, s3: 209, s4: 209 },
+  deep: { s1: 209, s2: 209, s3: 209, s4: 209 },
 };
-
 export function getBasePrice(service: string, homeSize: string): number {
   const svc = service.toLowerCase();
   // homeSize may be s1/s2/s3/s4 or 1br/2br/3br/4br
@@ -76,7 +81,9 @@ export function isBizService(service: string): boolean {
 const BIZ_TIER_MAP: Record<string, string> = {
   essential: 'essentials',
   signature: 'premium',
-  deep: 'luxe',
+  premier: 'extended',
+  ultimate: 'ultimate',
+  deep: 'ultimate',
 };
 
 /**
@@ -104,9 +111,11 @@ export function getBasePriceForMode(
 
 // ── Durations (hours) ─────────────────────────────────────────────────────────
 export const DURATIONS: Record<string, Record<string, number>> = {
-  essential: { s1: 0.75, s2: 1.125, s3: 1.6875, s4: 1.875 },
-  signature: { s1: 1, s2: 1.333, s3: 1.667, s4: 2 },
-  deep: { s1: 1.5, s2: 2.25, s3: 3, s4: 3 },
+  essential: { s1: 0.75, s2: 0.75, s3: 0.75, s4: 0.75 },
+  signature: { s1: 1, s2: 1, s3: 1, s4: 1 },
+  premier: { s1: 1.5, s2: 1.5, s3: 1.5, s4: 1.5 },
+  ultimate: { s1: 2, s2: 2, s3: 2, s4: 2 },
+  deep: { s1: 2, s2: 2, s3: 2, s4: 2 },
 };
 
 export function getDuration(service: string, homeSize: string): number {
@@ -119,18 +128,16 @@ export function getDuration(service: string, homeSize: string): number {
 // Zeroed (mirrors src/data/pricing.ts) so a test charge equals exactly the plan
 // price. calcAddOnTotal therefore always contributes $0 server-side.
 export const ADDON_PRICES: Record<string, number> = {
-  fridge: 35,
-  oven: 45,
-  windows: 25,
-  laundry: 30,
-  linen: 15,
-  pet: 40,
-  walls: 20,
-  organizing: 55,
+  'mobility-ball': 30,
+  'twin-mobility-ball': 40,
+  'foam-roller': 40,
+  'power-bottle': 25,
+  'trainer-bands': 50,
+  'personalized-protocol': 20,
 };
 
 // Per-unit add-ons (price × quantity)
-export const ADDON_PER_UNIT = new Set(['linen', 'walls']);
+export const ADDON_PER_UNIT = new Set<string>();
 
 export function calcAddOnTotal(addOns: Array<{ id: string; quantity?: number }>): number {
   return addOns.reduce((sum, a) => {

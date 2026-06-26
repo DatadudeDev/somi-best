@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSEO, seoMeta } from '../lib/useSEO';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -7,7 +7,7 @@ import { colors, fonts, typography } from '../styles/tokens';
 import { site } from '../config/site';
 import { addOns as addOnData, frequencyDiscounts, PKG_DISPLAY_NAME, PRICES, SIZE_LABELS, type Frequency, type SizeKey, type Pkg } from '../data/pricing';
 import { getBasePriceForMode } from '../lib/booking/constants';
-import { getMockDaySlots, getMockMonthAvailability, isBookingApiEnabled } from '../lib/booking/mock-availability';
+import { getMockDaySlots, getMockMonthAvailability, getFirstAvailableMonth, monthHasAvailability, isBookingApiEnabled } from '../lib/booking/mock-availability';
 import BookingStepper from '../components/ui/BookingStepper';
 import Button from '../components/ui/Button';
 import PaymentForm from '../components/ui/PaymentForm';
@@ -41,6 +41,11 @@ import { SERVICE_DESC, SERVICE_INCLUDES, ADDONS_INCLUDED_IN, PKGS } from '../lib
 import { formatPhoneNumber, validateName, validateEmail, validatePhone, parseFlexDate } from '../lib/booking/validation';
 import { STRIPE_APPEARANCE, navBtn, emptyCell, inputStyle, textareaStyle, inlineQtyBtn, fieldError } from '../lib/booking/booking-styles';
 import { ADDON_ICONS, ADDON_ICON_SIZE, ADDON_ICON_PADDING, ADDON_CARD_GAP } from '../components/booking/addon-icons';
+
+function bookingServiceKey(pkg: string, custom: boolean): string {
+  if (custom || pkg === 'Custom') return 'essential';
+  return pkg.toLowerCase();
+}
 
 export default function BookPage() {
   useSEO(seoMeta.book);
@@ -89,28 +94,51 @@ export default function BookPage() {
   const [selectedPkg, setSelectedPkg] = useState(pkgParam);
   const [selectedSize, setSelectedSize] = useState(sizeParam);
 
-  /** Keep pkg/size in sync when arriving via bento links (same route, new query). */
-  const searchKey = params.toString();
-  useEffect(() => {
-    setSelectedPkg(params.get('pkg') || 'Essential');
-    setSelectedSize(params.get('size') || 's1');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchKey]);
-
   /* frequency state */
   const [frequency, setFrequency] = useState<Frequency>('one-time');
 
   /* custom mode — selected services (multi-select) */
   const [customServices, setCustomServices] = useState<string[]>([]);
 
-  /* calendar state — floor at current month */
+  /* calendar state — open on first month with availability, not always current month */
   const today = new Date();
   const calendarFloorYear = today.getFullYear();
   const calendarFloorMonth = today.getMonth();
-  const [calYear, setCalYear] = useState(calendarFloorYear);
-  const [calMonth, setCalMonth] = useState(calendarFloorMonth);
-  const canGoPrevMonth = calYear > calendarFloorYear
-    || (calYear === calendarFloorYear && calMonth > calendarFloorMonth);
+  const initialCalendarMonth = getFirstAvailableMonth(
+    calendarFloorYear,
+    calendarFloorMonth,
+    bookingServiceKey(pkgParam, isCustom),
+    sizeParam,
+  );
+  const [calYear, setCalYear] = useState(initialCalendarMonth.year);
+  const [calMonth, setCalMonth] = useState(initialCalendarMonth.month);
+  const [earliestAvailableMonth, setEarliestAvailableMonth] = useState(initialCalendarMonth);
+  const calendarUserNavigatedRef = useRef(false);
+  const calendarAutoAdvanceCountRef = useRef(0);
+  const canGoPrevMonth = calYear > earliestAvailableMonth.year
+    || (calYear === earliestAvailableMonth.year && calMonth > earliestAvailableMonth.month);
+
+  /** Keep pkg/size in sync when arriving via bento links (same route, new query). */
+  const searchKey = params.toString();
+  useEffect(() => {
+    const nextPkg = params.get('pkg') || 'Essential';
+    const nextSize = params.get('size') || 's1';
+    setSelectedPkg(nextPkg);
+    setSelectedSize(nextSize);
+    if (isPrefill || prefilledDate) return;
+    calendarUserNavigatedRef.current = false;
+    calendarAutoAdvanceCountRef.current = 0;
+    const nextMonth = getFirstAvailableMonth(
+      calendarFloorYear,
+      calendarFloorMonth,
+      bookingServiceKey(nextPkg, isCustom),
+      nextSize,
+    );
+    setCalYear(nextMonth.year);
+    setCalMonth(nextMonth.month);
+    setEarliestAvailableMonth(nextMonth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchKey]);
 
   /* ── API availability state ── */
   const [monthAvailability, setMonthAvailability] = useState<Record<string, MonthDaySummary>>({});
@@ -241,7 +269,7 @@ export default function BookPage() {
   const fetchMonthAvailability = useCallback(async (year: number, month: number) => {
     setMonthLoading(true);
     try {
-      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      const serviceKey = bookingServiceKey(selectedPkg, isCustom);
 
       if (!bookingApiEnabled) {
         setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
@@ -258,7 +286,7 @@ export default function BookPage() {
         setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
       }
     } catch {
-      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'essential' : selectedPkg.toLowerCase();
+      const serviceKey = bookingServiceKey(selectedPkg, isCustom);
       setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
     } finally {
       setMonthLoading(false);
@@ -268,6 +296,46 @@ export default function BookPage() {
   useEffect(() => {
     fetchMonthAvailability(calYear, calMonth);
   }, [calYear, calMonth, fetchMonthAvailability]);
+
+  /** If the visible month has no open slots (e.g. API blocks differ from mock), advance automatically. */
+  useEffect(() => {
+    if (monthLoading || isPrefill || quotePrefillDone || calendarUserNavigatedRef.current) return;
+    if (monthHasAvailability(monthAvailability)) {
+      calendarAutoAdvanceCountRef.current = 0;
+      setEarliestAvailableMonth(prev => {
+        if (calYear < prev.year || (calYear === prev.year && calMonth < prev.month)) {
+          return { year: calYear, month: calMonth };
+        }
+        return prev;
+      });
+      return;
+    }
+    if (calendarAutoAdvanceCountRef.current >= 12) return;
+    calendarAutoAdvanceCountRef.current += 1;
+    if (calMonth === 11) {
+      setCalYear(y => y + 1);
+      setCalMonth(0);
+    } else {
+      setCalMonth(m => m + 1);
+    }
+  }, [monthAvailability, monthLoading, calYear, calMonth, isPrefill, quotePrefillDone]);
+
+  /** When protocol or size changes, re-open the first month that has slots. */
+  useEffect(() => {
+    if (isPrefill || quotePrefillDone) return;
+    calendarUserNavigatedRef.current = false;
+    calendarAutoAdvanceCountRef.current = 0;
+    const nextMonth = getFirstAvailableMonth(
+      calendarFloorYear,
+      calendarFloorMonth,
+      bookingServiceKey(selectedPkg, isCustom),
+      selectedSize,
+    );
+    setCalYear(nextMonth.year);
+    setCalMonth(nextMonth.month);
+    setEarliestAvailableMonth(nextMonth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPkg, selectedSize, isCustom]);
 
   /* scroll to top on step change */
   useEffect(() => {
@@ -439,16 +507,13 @@ export default function BookPage() {
     }
   }, [calYear, calMonth, selectedPkg, selectedSize, isCustom, bookingApiEnabled]);
 
-  /* When active slot changes, fetch its day slots */
+  /* When active slot or service changes, fetch its day slots */
   useEffect(() => {
     if (activeSlotIndex !== null && selections[activeSlotIndex]) {
       const day = selections[activeSlotIndex].day;
-      if (!daySlots[day]) {
-        fetchDaySlots(day);
-      }
+      fetchDaySlots(day);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSlotIndex]);
+  }, [activeSlotIndex, selectedPkg, selectedSize, fetchDaySlots, selections]);
 
   /* ── Promo code validation ── */
   const handlePromoValidate = async () => {
@@ -749,12 +814,14 @@ export default function BookPage() {
   /* nav helpers */
   const prevMonth = () => {
     if (!canGoPrevMonth) return;
+    calendarUserNavigatedRef.current = true;
     setDaySlots({});
     setActiveSlotIndex(null);
     if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
     else setCalMonth(m => m - 1);
   };
   const nextMonth = () => {
+    calendarUserNavigatedRef.current = true;
     setDaySlots({});
     setActiveSlotIndex(null);
     if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }

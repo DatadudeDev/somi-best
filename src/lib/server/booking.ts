@@ -112,7 +112,7 @@ export function resolveService(
   mode: BookingMode,
 ): ResolvedService | null {
   const baseServiceKey = SERVICE_DISPLAY_TO_KEY[service] ?? service.toLowerCase();
-  if (!['essential', 'signature', 'deep'].includes(baseServiceKey)) {
+  if (!['essential', 'signature', 'premier', 'ultimate', 'deep'].includes(baseServiceKey)) {
     return null;
   }
   const serviceKey = mode === 'business' ? `${BIZ_SERVICE_PREFIX}${baseServiceKey}` : baseServiceKey;

@@ -89,7 +89,7 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
-            <Button variant="primary" size="compact" href="/book?pkg=Signature&size=s1">
+            <Button variant="primary" size="compact" href="/book?pkg=Premier&size=s1">
               {site.nav.bookCta}
             </Button>
           </div>
@@ -167,7 +167,7 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
-            <Button href="/book?pkg=Signature&size=s1" size="large">{site.nav.bookCta}</Button>
+            <Button href="/book?pkg=Premier&size=s1" size="large">{site.nav.bookCta}</Button>
           </motion.div>
         )}
       </AnimatePresence>
