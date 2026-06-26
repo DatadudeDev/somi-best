@@ -477,6 +477,28 @@ export function buildIntentMetadata(p: BookingWritePayload): Record<string, stri
   };
 }
 
+/**
+ * Email-contract metadata keys the central somi-payments webhook needs to render
+ * booking-confirmation emails. Merged into the PaymentIntent metadata alongside
+ * buildIntentMetadata so buildBookingEmailPayload (somi-payments) recognizes the
+ * charge as a booking instead of skipping the email.
+ */
+export function buildEmailMetadata(
+  p: BookingWritePayload,
+  config: BookingConfig,
+): Record<string, string> {
+  return {
+    svcLabel: serviceLabel(p.serviceKey),
+    dateLabel: formatDateLabel(p.date),
+    timeLabel: formatTimeLabel(p.time),
+    totalLabel: p.totalCents > 0 ? formatMoney(p.totalCents, config.currency) : 'FREE',
+    bizName: config.businessName,
+    bizFrom: config.fromEmail,
+    bizReplyTo: config.replyToEmail ?? '',
+    bizNotify: config.notifyEmail ?? '',
+  };
+}
+
 /** Reconstruct a booking payload from PaymentIntent metadata. */
 export function extractBookingFromMetadata(
   metadata: Record<string, string>,

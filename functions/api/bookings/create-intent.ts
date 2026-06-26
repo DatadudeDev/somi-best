@@ -21,6 +21,7 @@ import {
   checkSlotAvailability,
   normalizeTime,
   buildIntentMetadata,
+  buildEmailMetadata,
   type AddOnInput,
   type BookingMode,
   type BookingWritePayload,
@@ -137,7 +138,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const intent = await createCentralIntent(env, {
         amountCents: pricing.totalCents,
         currency: config.currency,
-        metadata: buildIntentMetadata(payload),
+        metadata: { ...buildIntentMetadata(payload), ...buildEmailMetadata(payload, config) },
         receiptEmail: email.toLowerCase(),
       });
       return jsonOk({
@@ -175,7 +176,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       currency: config.currency,
       customer: stripeCustomerId,
       automatic_payment_methods: { enabled: true },
-      metadata: buildIntentMetadata(payload),
+      metadata: { ...buildIntentMetadata(payload), ...buildEmailMetadata(payload, config) },
     });
 
     return jsonOk({
