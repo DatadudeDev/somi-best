@@ -1,10 +1,14 @@
 /**
  * Local availability for template dev — used when booking APIs are not deployed.
+ * Mirrors business-hours.ts (Wed/Thu · 6 AM – 9 PM).
  */
 import { DURATIONS, type Pkg, type SizeKey } from '../../data/pricing';
-
-const SLOT_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
-const END_OF_DAY = 19;
+import {
+  getAvailableStartHours,
+  hourToLabel,
+  endTimeLabel,
+  isBookableDay,
+} from './business-hours';
 
 export interface MockAvailabilitySlot {
   hour: number;
@@ -19,38 +23,20 @@ export interface MockMonthDaySummary {
   bookingCount: number;
 }
 
-function formatHour(h: number): string {
-  const isPM = h >= 12;
-  const display = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  return `${display}:00 ${isPM ? 'PM' : 'AM'}`;
-}
-
-function formatEndTime(startHour: number, duration: number): string {
-  const endHour24 = startHour + duration;
-  const endHourWhole = Math.floor(endHour24);
-  const endMin = Math.round((endHour24 - endHourWhole) * 60);
-  const isPM = endHourWhole >= 12;
-  const displayHour = endHourWhole > 12 ? endHourWhole - 12 : endHourWhole === 0 ? 12 : endHourWhole;
-  const minStr = endMin > 0 ? `:${String(endMin).padStart(2, '0')}` : ':00';
-  return `${displayHour}${minStr} ${isPM ? 'PM' : 'AM'}`;
-}
-
 function durationHours(pkg: string, size: string): number {
   return DURATIONS[pkg as Pkg]?.[size as SizeKey] ?? 3;
 }
 
 export function getMockDaySlots(pkg: string, size: string): MockAvailabilitySlot[] {
   const dur = durationHours(pkg, size);
-  return SLOT_HOURS
-    .filter(h => h + dur <= END_OF_DAY)
-    .map(h => ({
-      hour: h,
-      label: formatHour(h),
-      endsBy: formatEndTime(h, dur),
-    }));
+  return getAvailableStartHours(dur).map(h => ({
+    hour: h,
+    label: hourToLabel(h),
+    endsBy: endTimeLabel(h, dur),
+  }));
 }
 
-/** Weekdays in month with open slots (template preview calendar). */
+/** Bookable days in month (Wed/Thu only). */
 export function getMockMonthAvailability(
   year: number,
   month: number,
@@ -66,9 +52,8 @@ export function getMockMonthAvailability(
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(year, month, day);
     if (date < today) continue;
-    const dow = date.getDay();
-    if (dow === 0) continue;
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    if (!isBookableDay(dateStr)) continue;
     days[dateStr] = {
       slotCount,
       available: slotCount > 0,

@@ -5,16 +5,23 @@
  * Returns the bookable start times for a single day:
  *   { date, available, blocked, slots: [{ hour, label, endsBy }], bookingCount, capacity }
  *
- * Availability = weekday · not past · not blocked · confirmed bookings under the
+ * Availability = bookable day (Wed/Thu) · not past · not blocked · confirmed bookings under the
  * settings.capacity_cap · start hours whose duration finishes by end of day.
  */
 
 import type { Env } from '../../../src/lib/server/config.ts';
 import { resolveConfig } from '../../../src/lib/server/config.ts';
 import { jsonOk, jsonError } from '../../../src/lib/server/http.ts';
-import { todayInTimezone, currentHourInTimezone, isWeekend } from '../../../src/lib/server/time.ts';
+import { todayInTimezone, currentHourInTimezone } from '../../../src/lib/server/time.ts';
 import { getCapacityCap } from '../../../src/lib/server/booking.ts';
-import { getDuration, getAvailableStartHours } from '../../../src/lib/booking/constants.ts';
+import { getDuration } from '../../../src/lib/booking/constants.ts';
+import {
+  getAvailableStartHours,
+  hourToLabel,
+  endTimeLabel,
+  isBookableDay,
+  minStartHourForDate,
+} from '../../../src/lib/booking/business-hours.ts';
 
 interface AvailabilitySlot {
   hour: number;
@@ -29,22 +36,6 @@ interface DayAvailabilityResponse {
   slots: AvailabilitySlot[];
   bookingCount: number;
   capacity: number;
-}
-
-function hourToLabel(hour: number): string {
-  if (hour < 12) return `${hour}:00 AM`;
-  if (hour === 12) return '12:00 PM';
-  return `${hour - 12}:00 PM`;
-}
-
-function endTimeLabel(startHour: number, durationHours: number): string {
-  const endHour24 = startHour + durationHours;
-  const endHourWhole = Math.floor(endHour24);
-  const endMin = Math.round((endHour24 - endHourWhole) * 60);
-  const isPM = endHourWhole >= 12;
-  const displayHour = endHourWhole > 12 ? endHourWhole - 12 : endHourWhole === 0 ? 12 : endHourWhole;
-  const minStr = endMin > 0 ? `:${String(endMin).padStart(2, '0')}` : ':00';
-  return `${displayHour}${minStr} ${isPM ? 'PM' : 'AM'}`;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -64,8 +55,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     date, available: false, blocked, slots: [], bookingCount, capacity,
   });
 
-  // Weekend / past-day gating (timezone-aware).
-  if (isWeekend(date)) return jsonOk(empty(false, 0));
+  // Non-bookable day / past-day gating (timezone-aware).
+  if (!isBookableDay(date)) return jsonOk(empty(false, 0));
   const today = todayInTimezone(config.timezone);
   if (date < today) return jsonOk(empty(false, 0));
 
@@ -102,7 +93,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   if (bookingCount >= capacity) return jsonOk(empty(false, bookingCount));
 
   const duration = getDuration(service, homeSize);
-  const minHour = date === today ? currentHourInTimezone(config.timezone) + 1 : 0;
+  const minHour = minStartHourForDate(date, today, currentHourInTimezone(config.timezone));
 
   const slots: AvailabilitySlot[] = getAvailableStartHours(duration)
     .filter((h) => h >= minHour && !bookedHours.has(h))

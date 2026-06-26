@@ -15,24 +15,23 @@ export function getDuration(pkg: string, size: string) {
   return DURATIONS[pkg as keyof typeof DURATIONS]?.[size as SizeKey] || 3;
 }
 
+import {
+  ALL_SLOT_HOURS,
+  BUSINESS_END_HOUR,
+  hourToLabel,
+  getAvailableStartHours,
+} from './business-hours';
+
 /* All possible start times — fallback while loading from API */
-export const ALL_TIME_SLOTS = [
-  { label: '8:00 AM', hour: 8 },
-  { label: '9:00 AM', hour: 9 },
-  { label: '10:00 AM', hour: 10 },
-  { label: '11:00 AM', hour: 11 },
-  { label: '12:00 PM', hour: 12 },
-  { label: '1:00 PM', hour: 13 },
-  { label: '2:00 PM', hour: 14 },
-  { label: '3:00 PM', hour: 15 },
-  { label: '4:00 PM', hour: 16 },
-  { label: '5:00 PM', hour: 17 },
-];
-export const END_OF_DAY = 19;
+export const ALL_TIME_SLOTS = ALL_SLOT_HOURS.map((hour) => ({
+  label: hourToLabel(hour),
+  hour,
+}));
+export const END_OF_DAY = BUSINESS_END_HOUR;
 
 export function getAvailableSlotsFallback(pkg: string, size: string) {
   const dur = getDuration(pkg, size);
-  return ALL_TIME_SLOTS.filter(s => s.hour + dur <= END_OF_DAY);
+  return ALL_TIME_SLOTS.filter(s => getAvailableStartHours(dur).includes(s.hour));
 }
 
 export function formatCompletionTime(startLabel: string, pkg: string, size: string): string {

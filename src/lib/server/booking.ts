@@ -8,7 +8,8 @@
  */
 
 import type { Env, BookingConfig } from './config.ts';
-import { todayInTimezone, currentHourInTimezone, isWeekend } from './time.ts';
+import { todayInTimezone, currentHourInTimezone } from './time.ts';
+import { isBookableDay, minStartHourForDate } from '../booking/business-hours.ts';
 import { sendBookingEmails, type BookingEmailData } from './email.ts';
 import {
   SERVICE_DISPLAY_TO_KEY,
@@ -150,13 +151,16 @@ export async function checkSlotAvailability(
   normalizedTime: string,
   duration: number,
 ): Promise<SlotCheck> {
-  if (isWeekend(date)) return { ok: false, status: 409, error: 'Selected date is not a weekday' };
+  if (!isBookableDay(date)) {
+    return { ok: false, status: 409, error: 'Selected date is not available for booking' };
+  }
 
   const today = todayInTimezone(config.timezone);
   if (date < today) return { ok: false, status: 409, error: 'Selected date is in the past' };
 
   const startHour = timeToHour(normalizedTime);
-  if (date === today && startHour < currentHourInTimezone(config.timezone) + 1) {
+  const minHour = minStartHourForDate(date, today, currentHourInTimezone(config.timezone));
+  if (date === today && startHour < minHour) {
     return { ok: false, status: 409, error: 'Selected time slot has already passed' };
   }
 

@@ -141,17 +141,15 @@ export function calcAddOnTotal(addOns: Array<{ id: string; quantity?: number }>)
 }
 
 // ── Time slots ────────────────────────────────────────────────────────────────
-// Cleaners work 8AM–7PM. A job of `duration` hours must finish by 7PM.
-export const ALL_SLOT_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
-export const END_OF_DAY_HOUR = 19; // 7PM
-
-/**
- * Return all start hours where the job can finish by END_OF_DAY_HOUR.
- * duration is in hours (may be fractional, e.g. 4.5).
- */
-export function getAvailableStartHours(duration: number): number[] {
-  return ALL_SLOT_HOURS.filter((h) => h + duration <= END_OF_DAY_HOUR);
-}
+// Wed/Thu only · 6 AM – 9 PM (see business-hours.ts)
+export {
+  ALL_SLOT_HOURS,
+  END_OF_DAY_HOUR,
+  getAvailableStartHours,
+  isBookableDay,
+  BUSINESS_START_HOUR,
+  BUSINESS_END_HOUR,
+} from './business-hours.ts';
 
 // ── Daily capacity cap ────────────────────────────────────────────────────────
 export const DEFAULT_DAILY_CAPACITY = 4;

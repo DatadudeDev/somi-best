@@ -29,7 +29,7 @@ export const site = {
     label: 'Calgary, Canada',
     /** Directions from the user's current location (Google Maps) */
     directionsUrl:
-      'https://www.google.com/maps/dir/?api=1&destination_place_id=ChIJE2UmPeB7cVMRIuvzfkwQuyg',
+      'https://www.google.com/maps/dir/?api=1&destination=BEST+Therapy,+Calgary,+AB&destination_place_id=ChIJE2UmPeB7cVMRIuvzfkwQuyg',
   },
 
   social: {
@@ -38,8 +38,9 @@ export const site = {
     tiktok: 'https://www.tiktok.com/@better.every.second',
   },
 
+  /** Opens Google “Write a review” for the business (testimonials badge link) */
   googleProfileUrl:
-    'https://www.google.com/maps/place/?q=place_id:ChIJE2UmPeB7cVMRIuvzfkwQuyg',
+    'https://search.google.com/local/writereview?placeid=ChIJE2UmPeB7cVMRIuvzfkwQuyg',
 
   services: {
     sectionLabel: 'Recovery Protocols',

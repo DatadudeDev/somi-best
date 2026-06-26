@@ -9,9 +9,15 @@
 import type { Env } from '../../../src/lib/server/config.ts';
 import { resolveConfig } from '../../../src/lib/server/config.ts';
 import { jsonOk, jsonError } from '../../../src/lib/server/http.ts';
-import { todayInTimezone, currentHourInTimezone, dayOfWeek } from '../../../src/lib/server/time.ts';
+import { todayInTimezone, currentHourInTimezone } from '../../../src/lib/server/time.ts';
 import { getCapacityCap } from '../../../src/lib/server/booking.ts';
-import { getDuration, getAvailableStartHours } from '../../../src/lib/booking/constants.ts';
+import { getDuration } from '../../../src/lib/booking/constants.ts';
+import {
+  getAvailableStartHours,
+  isBookableDay,
+  minStartHourForDate,
+  BUSINESS_START_HOUR,
+} from '../../../src/lib/booking/business-hours.ts';
 
 interface DaySummary {
   slotCount: number;
@@ -77,9 +83,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   const today = todayInTimezone(config.timezone);
-  const todayMinHour = today.startsWith(`${year}-${monthStr}-`)
-    ? currentHourInTimezone(config.timezone) + 1
-    : 0;
+  const currentHour = currentHourInTimezone(config.timezone);
 
   const capacity = await getCapacityCap(env.DB);
   const duration = getDuration(service, homeSize);
@@ -93,8 +97,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       days[dayStr] = { slotCount: 0, available: false, blocked: false, bookingCount: 0 };
       continue;
     }
-    const dow = dayOfWeek(dayStr);
-    if (dow === 0 || dow === 6) {
+    if (!isBookableDay(dayStr)) {
       days[dayStr] = { slotCount: 0, available: false, blocked: false, bookingCount: 0 };
       continue;
     }
@@ -108,7 +111,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       continue;
     }
     const bookedHours = bookedHoursByDay.get(dayStr) ?? new Set<number>();
-    const minHour = dayStr === today ? todayMinHour : 0;
+    const minHour = dayStr === today
+      ? minStartHourForDate(dayStr, today, currentHour)
+      : BUSINESS_START_HOUR;
     const slotCount = startHours.filter((h) => h >= minHour && !bookedHours.has(h)).length;
     days[dayStr] = { slotCount, available: slotCount > 0, blocked: false, bookingCount };
   }

@@ -62,7 +62,12 @@ const LOCAL_BUSINESS: Record<string, unknown> = {
   areaServed: { '@type': 'City', name: site.location.city },
   aggregateRating: AGGREGATE_RATING,
   review: REVIEWS,
-  sameAs: [site.googleProfileUrl, site.social.facebook, site.social.instagram, site.social.tiktok],
+  sameAs: [
+    `https://www.google.com/maps/place/?q=place_id:${site.location.placeId}`,
+    site.social.facebook,
+    site.social.instagram,
+    site.social.tiktok,
+  ],
 };
 
 /** PLACEHOLDER (reskin): FAQ schema copy */
