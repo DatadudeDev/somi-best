@@ -4,6 +4,7 @@
  */
 
 import { site } from '../config/site';
+import { getSchemaOpeningHoursSpecification } from './booking/business-hours';
 import { images } from '../styles/tokens';
 
 export interface SEOMeta {
@@ -60,6 +61,7 @@ const LOCAL_BUSINESS: Record<string, unknown> = {
     longitude: site.location.geo.lng,
   },
   areaServed: { '@type': 'City', name: site.location.city },
+  openingHoursSpecification: getSchemaOpeningHoursSpecification(),
   aggregateRating: AGGREGATE_RATING,
   review: REVIEWS,
   sameAs: [

@@ -1,10 +1,29 @@
 /**
  * Site configuration — BEST Therapeutics
  * Better Every Second — active recovery & performance wellness.
+ *
+ * Legal / branding overrides (Vite build-time):
+ *   VITE_BUSINESS_NAME, VITE_BUSINESS_LEGAL_NAME, VITE_BUSINESS_LOCATION,
+ *   VITE_BUSINESS_CITY, VITE_BUSINESS_REGION, VITE_LEGAL_EFFECTIVE_DATE
  */
 
+const businessName =
+  (import.meta.env.VITE_BUSINESS_NAME as string | undefined)?.trim() || 'BEST Therapy';
+const businessLegalName =
+  (import.meta.env.VITE_BUSINESS_LEGAL_NAME as string | undefined)?.trim()
+  || 'BEST Therapeutics LLC';
+const businessCity =
+  (import.meta.env.VITE_BUSINESS_CITY as string | undefined)?.trim() || 'Calgary';
+const businessRegion =
+  (import.meta.env.VITE_BUSINESS_REGION as string | undefined)?.trim() || 'AB';
+const businessLocationLabel =
+  (import.meta.env.VITE_BUSINESS_LOCATION as string | undefined)?.trim()
+  || `${businessCity}, ${businessRegion}, Canada`;
+const legalEffectiveDate =
+  (import.meta.env.VITE_LEGAL_EFFECTIVE_DATE as string | undefined)?.trim() || 'June 1, 2026';
+
 export const site = {
-  name: 'BEST Therapy',
+  name: businessName,
   nameShort: 'BEST',
   logoSub: 'Better Every Second Therapeutics',
   tagline: 'Active recovery. Every second counts.',
@@ -21,13 +40,13 @@ export const site = {
   },
 
   location: {
-    city: 'Calgary',
-    region: 'AB',
+    city: businessCity,
+    region: businessRegion,
     country: 'CA',
     geo: { lat: 51.0447, lng: -114.0719 },
     /** Google Place ID — used for Maps directions + business profile link */
     placeId: 'ChIJE2UmPeB7cVMRIuvzfkwQuyg',
-    label: 'Calgary, Canada',
+    label: businessLocationLabel,
     /** Directions from the user's current location (Google Maps) */
     directionsUrl:
       'https://www.google.com/maps/dir/?api=1&destination=BEST+Therapy,+Calgary,+AB&destination_place_id=ChIJE2UmPeB7cVMRIuvzfkwQuyg',
@@ -155,7 +174,10 @@ export const site = {
   },
 
   legal: {
-    companyLegalName: 'BEST Therapeutics LLC',
+    businessName,
+    companyLegalName: businessLegalName,
+    locationLabel: businessLocationLabel,
+    effectiveDate: legalEffectiveDate,
   },
 
   booking: {
@@ -168,8 +190,6 @@ export const site = {
         'By confirming this booking, you agree to the recovery protocol selected above and BEST Therapeutics\' service terms.',
       cancellationPolicy:
         'Cancel or reschedule free up to 12 hours before your session. Late cancellations may incur a $35 fee.',
-      customQuoteSidebar:
-        'Custom protocol pricing confirmed in your personalized quote.',
       propertyTypes: ['Gym / Training Facility', 'Corporate Wellness', 'Sports Team', 'Other'] as const,
     },
   },

@@ -43,6 +43,7 @@ import {
 import { getDuration } from '../../../src/lib/booking/constants.ts';
 
 import { useCentralPayments, updateCentralIntent } from '../../../src/lib/server/payments.ts';
+import { verifyTurnstileForContact } from '../../../src/lib/server/turnstile.ts';
 
 
 
@@ -78,6 +79,8 @@ interface UpdateIntentBody {
 
   mode?: 'individual' | 'business';
 
+  turnstileToken?: string;
+
 }
 
 
@@ -100,6 +103,19 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
 
       return jsonError('Missing required fields: paymentIntentId, service, sizeKey, date, time');
 
+    }
+
+    const ip = context.request.headers.get('CF-Connecting-IP') ?? '';
+    const turnstileOk = await verifyTurnstileForContact(
+      env,
+      body.turnstileToken,
+      ip,
+      body.name,
+      body.email,
+      body.phone,
+    );
+    if (!turnstileOk) {
+      return jsonError('Bot verification failed. Please refresh and try again.', 403);
     }
 
 

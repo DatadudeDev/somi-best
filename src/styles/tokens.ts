@@ -193,5 +193,5 @@ export const images = {
   sectionBackdrop: '/images/best/logo-mark.png',
   contactHero: `${HERO}/hero-01-athlete-training.jpg`,
   businessHero: `${HERO}/hero-06-business.jpg`,
-  ogDefault: '/images/best/logo-full.png',
+  ogDefault: '/images/best/og-image.png',
 } as const;

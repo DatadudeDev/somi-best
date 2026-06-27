@@ -315,3 +315,50 @@ export async function sendBookingEmails(
 
   return allOk;
 }
+
+export interface ContactInquiryData {
+  name: string;
+  email: string;
+  phone?: string;
+  message: string;
+}
+
+/** Forward a website contact form submission to the business inbox. */
+export async function sendContactInquiry(
+  env: Env,
+  config: BookingConfig,
+  data: ContactInquiryData,
+): Promise<boolean> {
+  const apiKey = env.RESEND_API_KEY;
+  const to = config.notifyEmail ?? config.replyToEmail;
+  if (!apiKey || !to) {
+    console.warn('[email] contact — RESEND_API_KEY or notify inbox not configured');
+    return false;
+  }
+
+  const from = `"${config.businessName}" <${config.fromEmail}>`;
+  const phoneLine = data.phone?.trim()
+    ? `<p style="margin:0 0 12px;font-family:${t.fontBody};font-size:15px;color:${t.textPrimary};"><strong>Phone:</strong> ${esc(data.phone.trim())}</p>`
+    : '';
+  const html = emailShell(
+    `<p style="margin:0 0 16px;font-family:${t.fontBody};font-size:15px;color:${t.textPrimary};">`
+    + `<strong>New contact form message</strong></p>`
+    + `<p style="margin:0 0 12px;font-family:${t.fontBody};font-size:15px;color:${t.textPrimary};"><strong>From:</strong> ${esc(data.name)} &lt;${esc(data.email)}&gt;</p>`
+    + phoneLine
+    + `<p style="margin:0;font-family:${t.fontBody};font-size:15px;line-height:1.6;color:${t.textPrimary};white-space:pre-wrap;">${esc(data.message)}</p>`,
+  );
+
+  try {
+    await sendViaResend(apiKey, {
+      from,
+      to,
+      reply_to: data.email,
+      subject: `Contact form — ${data.name}`,
+      html,
+    });
+    return true;
+  } catch (err) {
+    console.error('[email] contact inquiry failed:', err);
+    return false;
+  }
+}

@@ -27,9 +27,8 @@ jobs:
       - run: npm run build
 
   lint:
-    name: Lint (eslint)           # non-blocking for now — flip continue-on-error off after cleanup
+    name: Lint (eslint)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,9 +39,8 @@ jobs:
       - run: npm run lint
 
   typecheck:
-    name: Typecheck (tsc)         # non-blocking for now — 15 pre-existing template-debt errors
+    name: Typecheck (tsc)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

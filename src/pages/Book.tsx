@@ -12,10 +12,8 @@ import BookingStepper from '../components/ui/BookingStepper';
 import Button from '../components/ui/Button';
 import PhoneInput from '../components/ui/PhoneInput';
 import LazyAddressField, { type AddressResult } from '../components/ui/LazyAddressField';
-import { clarityEvent, clarityTag, clarityUpgrade } from '../lib/clarity';
 import { useTurnstile } from '../lib/useTurnstile';
 import { tracker } from '../lib/tracker';
-import QuoteIntakeForm from '../components/booking/QuoteIntakeForm';
 
 import type {
   AvailabilitySlot,
@@ -37,14 +35,13 @@ import {
   CAL_SELECTED_LABEL_FONT,
 } from '../lib/booking/booking-helpers';
 import { SERVICE_DESC, SERVICE_INCLUDES, ADDONS_INCLUDED_IN, PKGS } from '../lib/booking/service-meta';
-import { validateName, validateEmail, validatePhone, parseFlexDate } from '../lib/booking/validation';
+import { validateName, validateEmail, validatePhone } from '../lib/booking/validation';
 import { navBtn, emptyCell, inputStyle, textareaStyle, inlineQtyBtn, fieldError } from '../lib/booking/booking-styles';
 import { ADDON_ICONS, ADDON_ICON_SIZE, ADDON_ICON_PADDING, ADDON_CARD_GAP } from '../components/booking/addon-icons';
 
 const BookStripeCheckout = lazy(() => import('../components/booking/BookStripeCheckout'));
 
-function bookingServiceKey(pkg: string, custom: boolean): string {
-  if (custom || pkg === 'Custom') return 'tier1';
+function bookingServiceKey(pkg: string): string {
   return pkg.toLowerCase();
 }
 
@@ -67,11 +64,20 @@ export default function BookPage() {
   const pkgParam = params.get('pkg') || 'Tier1';
   const sizeParam = params.get('size') || 's1';
 
-  // Booking mode — drives business vs individual UI + pricing
-  const bookingMode = (params.get('mode') || 'individual') as 'individual' | 'business' | 'custom';
-  const isBusiness = bookingMode === 'business';
-  // Custom quote mode — hides scheduling + pricing, shows QuoteIntakeForm at step 3
-  const isCustom = bookingMode === 'custom';
+  // Booking mode — business vs individual pricing/UI
+  const isBusiness = params.get('mode') === 'business';
+
+  // Strip legacy custom-quote URL params (mode=custom, quoteId, prefill, etc.)
+  useEffect(() => {
+    const legacyKeys = ['quoteId', 'prefill', 'promo', 'date', 'time', 'notes'] as const;
+    const hasLegacy = params.get('mode') === 'custom' || legacyKeys.some((k) => params.has(k));
+    if (!hasLegacy) return;
+    const next = new URLSearchParams(searchParams);
+    if (next.get('mode') === 'custom') next.delete('mode');
+    legacyKeys.forEach((k) => next.delete(k));
+    setSearchParams(next, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Booking source attribution — read from URL params set by email click redirects or UTM campaigns
   const utmSource = params.get('utm_source') ?? undefined;
@@ -85,22 +91,8 @@ export default function BookPage() {
   const bookingSource: string = refParam === 'email' ? 'email' : (utmSource || utmMedium || utmCampaign) ? 'utm' : 'direct';
   const sourceEmailId: string | undefined = refParam === 'email' ? (eidParam ?? undefined) : undefined;
 
-  // Quote conversion params (from approval email link)
-  const quoteId = params.get('quoteId');
-  const prefilledPromo = params.get('promo');
-  const isPrefill = params.get('prefill') === '1';
-  // URL params embedded by approve.ts for synchronous prefill (avoids date-format issues)
-  const prefilledDate = params.get('date');
-  const prefilledTime = params.get('time');
-  const prefilledNotes = params.get('notes');
-
-  // Drag-drop state for custom quote mode
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [pendingDropFiles, setPendingDropFiles] = useState<File[]>([]);
-  // Quote prefill state
-  const [quotePrefillDone, setQuotePrefillDone] = useState(false);
-  const [quoteAlreadyConverted, setQuoteAlreadyConverted] = useState(false);
-  const { containerRef: turnstileRef, reset: resetTurnstile } = useTurnstile('booking', step === 3);
+  const { containerRef: turnstileRef, getToken, reset: resetTurnstile } = useTurnstile('booking', step === 3);
+  const turnstileEnabled = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
   const fetchedDayKeysRef = useRef(new Set<string>());
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
   const [expandedAddOn, setExpandedAddOn] = useState<string | null>(null);
@@ -110,9 +102,6 @@ export default function BookPage() {
   /* frequency state */
   const [frequency, setFrequency] = useState<Frequency>('one-time');
 
-  /* custom mode — selected services (multi-select) */
-  const [customServices, setCustomServices] = useState<string[]>([]);
-
   /* calendar state — open on first month with availability, not always current month */
   const today = new Date();
   const calendarFloorYear = today.getFullYear();
@@ -120,7 +109,7 @@ export default function BookPage() {
   const initialCalendarMonth = getFirstAvailableMonth(
     calendarFloorYear,
     calendarFloorMonth,
-    bookingServiceKey(pkgParam, isCustom),
+    bookingServiceKey(pkgParam),
     sizeParam,
   );
   const [calYear, setCalYear] = useState(initialCalendarMonth.year);
@@ -138,13 +127,12 @@ export default function BookPage() {
     const nextSize = params.get('size') || 's1';
     setSelectedPkg(nextPkg);
     setSelectedSize(nextSize);
-    if (isPrefill || prefilledDate) return;
     calendarUserNavigatedRef.current = false;
     calendarAutoAdvanceCountRef.current = 0;
     const nextMonth = getFirstAvailableMonth(
       calendarFloorYear,
       calendarFloorMonth,
-      bookingServiceKey(nextPkg, isCustom),
+      bookingServiceKey(nextPkg),
       nextSize,
     );
     setCalYear(nextMonth.year);
@@ -172,16 +160,12 @@ export default function BookPage() {
   const hasMinimumSlots = selections.length >= 1;
   const scheduleComplete = hasMinimumSlots && allSlotsHaveTime;
 
-  const hasProtocol = isCustom
-    ? customServices.length > 0
-    : Boolean(selectedPkg && selectedPkg !== 'Custom');
+  const hasProtocol = Boolean(selectedPkg);
   const hasFrequency = Boolean(frequency);
   const canProceedToCheckout = hasProtocol && hasFrequency && hasMinimumSlots && allSlotsHaveTime;
 
   const attemptContinueToStep3 = () => {
     if (!canProceedToCheckout) return;
-    clarityEvent('booking_cta_click');
-    clarityTag('booking_package', selectedPkg);
     tracker.bookingStep(3, { service: selectedPkg, size: selectedSize, frequency });
     setBookingStep(3);
   };
@@ -309,7 +293,7 @@ export default function BookPage() {
   const fetchMonthAvailability = useCallback(async (year: number, month: number) => {
     setMonthLoading(true);
     try {
-      const serviceKey = bookingServiceKey(selectedPkg, isCustom);
+      const serviceKey = bookingServiceKey(selectedPkg);
 
       if (!bookingApiEnabled) {
         setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
@@ -336,7 +320,7 @@ export default function BookPage() {
     } finally {
       setMonthLoading(false);
     }
-  }, [selectedPkg, selectedSize, isCustom, bookingApiEnabled]);
+  }, [selectedPkg, selectedSize, bookingApiEnabled]);
 
   useEffect(() => {
     fetchMonthAvailability(calYear, calMonth);
@@ -344,7 +328,7 @@ export default function BookPage() {
 
   /** If the visible month has no open slots (e.g. API blocks differ from mock), advance automatically. */
   useEffect(() => {
-    if (monthLoading || isPrefill || quotePrefillDone || calendarUserNavigatedRef.current) return;
+    if (monthLoading || calendarUserNavigatedRef.current) return;
     if (monthHasAvailability(monthAvailability)) {
       calendarAutoAdvanceCountRef.current = 0;
       setEarliestAvailableMonth(prev => {
@@ -363,147 +347,28 @@ export default function BookPage() {
     } else {
       setCalMonth(m => m + 1);
     }
-  }, [monthAvailability, monthLoading, calYear, calMonth, isPrefill, quotePrefillDone]);
+  }, [monthAvailability, monthLoading, calYear, calMonth]);
 
   /** When protocol or size changes, re-open the first month that has slots. */
   useEffect(() => {
-    if (isPrefill || quotePrefillDone) return;
     calendarUserNavigatedRef.current = false;
     calendarAutoAdvanceCountRef.current = 0;
     const nextMonth = getFirstAvailableMonth(
       calendarFloorYear,
       calendarFloorMonth,
-      bookingServiceKey(selectedPkg, isCustom),
+      bookingServiceKey(selectedPkg),
       selectedSize,
     );
     setCalYear(nextMonth.year);
     setCalMonth(nextMonth.month);
     setEarliestAvailableMonth(nextMonth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPkg, selectedSize, isCustom]);
+  }, [selectedPkg, selectedSize]);
 
   /* scroll to top on step change */
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [step]);
-
-  /* Custom mode — no longer auto-skips step 2; users pick a date before the quote form */
-
-  /* ── Prefill from quote (conversion link: /book?quoteId=&promo=&prefill=1) ── */
-  useEffect(() => {
-    if (!isPrefill || !quoteId || quotePrefillDone) return;
-
-    // ── Apply URL params IMMEDIATELY (synchronous — no async wait) ────────────
-    // date, time, notes, and size are embedded in the approval email CTA URL by
-    // approve.ts so they are available without waiting for the API response.
-    // This ensures formReady becomes true early → handleContinueToCheckout fires
-    // → Stripe payment intent is created without delay.
-    if (prefilledDate) {
-      const parsed = parseFlexDate(prefilledDate);
-      if (parsed) {
-        setCalYear(parsed.year);
-        setCalMonth(parsed.month);
-        setSelections([{
-          day: parsed.day,
-          month: parsed.month,
-          year: parsed.year,
-          time: prefilledTime || null,
-          endsBy: undefined,
-        }]);
-      }
-    }
-    if (prefilledNotes) setSessionNotes(prefilledNotes);
-
-    // ── Fetch quote record for name/email/phone/address/promo/size ────────────
-    fetch(`/api/quotes/${quoteId}`)
-      .then(async r => {
-        if (!r.ok) {
-          try {
-            const errData = await r.json() as { error?: string };
-            if (errData.error === 'quote_already_converted') {
-              setQuoteAlreadyConverted(true);
-            }
-          } catch { /* ignore parse errors */ }
-          return;
-        }
-        const d = await r.json() as {
-          quoteId?: string;
-          name?: string;
-          email?: string;
-          phone?: string;
-          service_address?: string;
-          unit_number?: string | null;
-          promoCode?: string | null;
-          preferred_date?: string | null;
-          preferred_time?: string | null;
-          size_key?: string | null;
-          notes?: string | null;
-          custom_services?: string | null;
-        };
-        if (d.name)            setContactName(d.name);
-        if (d.email)           setContactEmail(d.email);
-        if (d.phone)           setContactPhone(d.phone);
-        if (d.service_address) setServiceAddress(d.service_address);
-        if (d.unit_number)     setUnitNumber(d.unit_number);
-
-        // Prefill home size — URL param 'size' takes precedence, but API fills it if missing
-        if (d.size_key) setSelectedSize(d.size_key);
-
-        // Prefill custom services
-        if (d.custom_services) {
-          const svcs = d.custom_services.split(',').map(s => s.trim()).filter(Boolean);
-          if (svcs.length > 0) setCustomServices(svcs);
-        }
-
-        // Prefill date/time from API — only if URL params didn't already set them.
-        // Uses parseFlexDate to handle both ISO ("2026-05-13") and display ("May 13, 2026") formats.
-        if (!prefilledDate && d.preferred_date) {
-          const parsed = parseFlexDate(d.preferred_date);
-          if (parsed) {
-            setCalYear(parsed.year);
-            setCalMonth(parsed.month);
-            setSelections([{
-              day: parsed.day,
-              month: parsed.month,
-              year: parsed.year,
-              time: d.preferred_time || null,
-              endsBy: undefined,
-            }]);
-          }
-        }
-
-        // Prefill notes from API — only if URL params didn't already provide them
-        if (!prefilledNotes && d.notes) setSessionNotes(d.notes);
-
-        // Auto-apply promo from URL param (takes precedence over quote record)
-        const promo = prefilledPromo || d.promoCode || null;
-        if (promo) {
-          const upperPromo = promo.toUpperCase();
-          setPromoCode(upperPromo);
-          // Validate the promo so it auto-applies
-          try {
-            const pRes = await fetch('/api/promo/validate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code: upperPromo, service: 'Custom', basePrice: 0 }),
-            });
-            const pData = await pRes.json() as PromoResponse;
-            setPromoResult(pData);
-            if (pData.valid) setAppliedPromo(upperPromo);
-          } catch {
-            // promo validate failed — leave unapplied
-          }
-        }
-
-        setQuotePrefillDone(true);
-
-        // Skip directly to step 3 — user should NOT see step 2 again
-        // The auto-create-intent effect will fire once formReady becomes true
-        setBookingStep(3);
-      })
-      .catch(() => { /* ignore — leave form with defaults */ });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPrefill, quoteId]);
 
   /* ── Get available days from API response ── */
   const available = useMemo(() => {
@@ -529,7 +394,7 @@ export default function BookPage() {
   /* ── Fetch time slots for a specific day ── */
   const fetchDaySlots = useCallback(async (day: number) => {
     const dateStr = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'tier1' : selectedPkg.toLowerCase();
+    const serviceKey = bookingServiceKey(selectedPkg);
     const cacheKey = `${dateStr}:${serviceKey}:${selectedSize}`;
     if (fetchedDayKeysRef.current.has(cacheKey)) return;
     fetchedDayKeysRef.current.add(cacheKey);
@@ -562,7 +427,7 @@ export default function BookPage() {
     } finally {
       setDayLoading(prev => ({ ...prev, [day]: false }));
     }
-  }, [calYear, calMonth, selectedPkg, selectedSize, isCustom, bookingApiEnabled]);
+  }, [calYear, calMonth, selectedPkg, selectedSize, bookingApiEnabled]);
 
   /* When active slot or service changes, fetch its day slots */
   useEffect(() => {
@@ -700,7 +565,6 @@ export default function BookPage() {
       }
 
       setCheckoutInitialized(true);
-      clarityUpgrade('booking_checkout');
     } catch {
       setIntentError('Network error. Please check your connection and try again.');
     } finally {
@@ -713,6 +577,17 @@ export default function BookPage() {
     const built = buildCheckoutPayload();
     if (!built) return false;
 
+    let turnstileToken: string | undefined;
+    if (turnstileEnabled && contactValid) {
+      try {
+        turnstileToken = await getToken();
+      } catch {
+        setIntentError('Bot verification failed. Please refresh and try again.');
+        resetTurnstile();
+        return false;
+      }
+    }
+
     try {
       const res = await fetch('/api/bookings/update-intent', {
         method: 'PATCH',
@@ -720,11 +595,13 @@ export default function BookPage() {
         body: JSON.stringify({
           paymentIntentId,
           ...built.body,
+          ...(turnstileToken ? { turnstileToken } : {}),
         }),
       });
       if (!res.ok) {
         const data = await res.json() as { error?: string };
         setIntentError(data.error ?? 'Could not update booking details.');
+        if (res.status === 403) resetTurnstile();
         return false;
       }
       return true;
@@ -732,10 +609,9 @@ export default function BookPage() {
       setIntentError('Network error while preparing payment.');
       return false;
     }
-  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload]);
+  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload, turnstileEnabled, contactValid, getToken, resetTurnstile]);
 
   const intentBootstrapReady = step === 3
-    && !isCustom
     && !checkoutInitialized
     && !intentLoading
     && !intentError
@@ -777,15 +653,13 @@ export default function BookPage() {
       ? `${MONTH_NAMES_LOCAL[primarySel.month]} ${primarySel.day}, ${primarySel.year}${primarySel.time ? ` at ${primarySel.time}` : ''}`
       : '';
     return {
-      service: `${(isCustom || selectedPkg === 'Custom') ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]} — ${SIZE_LABELS[selectedSize as SizeKey]}`,
+      service: `${PKG_DISPLAY_NAME[selectedPkg as Pkg]} — ${SIZE_LABELS[selectedSize as SizeKey]}`,
       dateTime,
       frequency: frequencyDiscounts[frequency].label,
       total: isFreeBooking ? 'FREE' : `$${grandTotal.toFixed(2)} CAD`,
       isFree: isFreeBooking,
       promoApplied: !!(promoResult?.valid && appliedPromo),
       email: contactEmail || undefined,
-      // Quote conversion: include mode + reference so BookingSuccess shows quote variant
-      ...(quoteId ? { mode: 'quote' as const, quoteRef: quoteId.slice(0, 12).toUpperCase(), name: contactName || undefined } : {}),
     };
   };
 
@@ -800,18 +674,6 @@ export default function BookPage() {
         body: JSON.stringify({ paymentIntentId }),
       });
       if (res.ok) {
-        const confirmData = await res.json() as { bookingId?: string; status?: string };
-
-        // If this was a quote conversion, mark the quote as converted
-        if (quoteId && confirmData.bookingId) {
-          fetch(`/api/quotes/${quoteId}/convert`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ booking_id: confirmData.bookingId }),
-          }).catch(err => console.warn('[quote/convert] failed (non-blocking):', err));
-        }
-
-        clarityEvent('booking_confirmed');
         tracker.event('booking_checkout_started', { svc: selectedPkg, sz: selectedSize, freq: frequency });
         navigate('/booking-success', { state: buildSuccessState() });
       } else {
@@ -839,6 +701,17 @@ export default function BookPage() {
       .filter(a => selectedAddOns[a.id]?.on)
       .map(a => ({ id: a.id, quantity: a.unit ? (selectedAddOns[a.id]?.qty ?? 1) : 1 }));
     try {
+      let turnstileToken: string | undefined;
+      if (turnstileEnabled) {
+        try {
+          turnstileToken = await getToken();
+        } catch {
+          setFreeError('Bot verification failed. Please refresh and try again.');
+          resetTurnstile();
+          return;
+        }
+      }
+
       const res = await fetch('/api/bookings/confirm-free', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -856,6 +729,7 @@ export default function BookPage() {
           frequency,
           serviceAddress: unitNumber ? `${serviceAddress}, Unit ${unitNumber}` : serviceAddress,
           ...(serviceAddressCoords ? { lat: serviceAddressCoords.lat, lng: serviceAddressCoords.lng } : {}),
+          ...(turnstileToken ? { turnstileToken } : {}),
           // Source attribution
           source: bookingSource,
           utmSource,
@@ -865,7 +739,6 @@ export default function BookPage() {
         }),
       });
       if (res.ok) {
-        clarityEvent('booking_confirmed');
         tracker.event('booking_checkout_started', { svc: selectedPkg, sz: selectedSize, freq: frequency });
         navigate('/booking-success', { state: buildSuccessState() });
       } else {
@@ -990,67 +863,7 @@ export default function BookPage() {
 
     <div
       style={{ paddingTop: '54px', background: colors.cream, minHeight: '100vh' }}
-      onDragEnter={isCustom && step === 3 ? (e) => { e.preventDefault(); setIsDragOver(true); } : undefined}
-      onDragOver={isCustom && step === 3 ? (e) => { e.preventDefault(); setIsDragOver(true); } : undefined}
-      onDragLeave={isCustom && step === 3 ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false); } : undefined}
-      onDrop={isCustom && step === 3 ? (e) => {
-        e.preventDefault();
-        setIsDragOver(false);
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length > 0) setPendingDropFiles(files);
-      } : undefined}
     >
-      {/* ── Drag-drop overlay (custom mode + step 3 only) ── */}
-      {isCustom && step === 3 && isDragOver && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          background: 'rgba(115,115,115,0.15)',
-          border: `3px dashed ${colors.sageGreen}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-        }}>
-          <div style={{
-            fontSize: '1.5rem',
-            color: colors.sageGreen,
-            fontWeight: 600,
-            fontFamily: fonts.body,
-            background: 'rgba(245,240,232,0.9)',
-            padding: '24px 40px',
-            borderRadius: '12px',
-            border: `2px solid ${colors.sageGreen}`,
-          }}>
-            Drop files to attach to your quote
-          </div>
-        </div>
-      )}
-
-      {/* ── Already converted: quote was already used to book ── */}
-      {quoteAlreadyConverted && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: '40px 20px', textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '16px' }}>✅</div>
-          <h2 style={{ fontFamily: fonts.display, fontSize: '24px', color: colors.charcoal, marginBottom: '12px' }}>
-            Quote Already Booked
-          </h2>
-          <p style={{ fontFamily: fonts.body, fontSize: '16px', color: colors.warmGray, maxWidth: '400px', marginBottom: '32px', lineHeight: '1.6' }}>
-            This quote has already been converted to a booking. Request a new quote below if needed.
-          </p>
-          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <Button variant="primary" onClick={() => { window.location.href = '/book?mode=custom'; }}>
-              Request a New Quote →
-            </Button>
-            <Button variant="outline" onClick={() => { window.location.href = '/'; }}>
-              Go Home
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {!quoteAlreadyConverted && (
-        <>
       <div className="book-outer" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 16px 60px' }}>
 
         <BookingStepper
@@ -1139,55 +952,6 @@ export default function BookPage() {
             {step === 2 && (
               <>
                 {/* ── SERVICE TYPE SELECTOR ── */}
-                {/* Quote conversion: show locked custom service banner */}
-                {isPrefill && quoteId && (
-                  <div style={{
-                    padding: '16px',
-                    background: 'rgba(115,115,115,0.08)',
-                    border: '1px solid rgba(115,115,115,0.3)',
-                    borderRadius: '8px',
-                    marginBottom: '24px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                  }}>
-                    <span style={{ fontSize: '20px', flexShrink: 0 }}>🔒</span>
-                    <div>
-                      <div style={{ fontFamily: fonts.body, fontSize: '15px', fontWeight: 500, color: colors.charcoal, marginBottom: '4px' }}>
-                        Custom Quote
-                      </div>
-                      <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, lineHeight: 1.5 }}>
-                        Service and price set by your approved quote.
-                        {promoResult?.valid && promoResult.finalPrice != null && (
-                          <> Your approved total (incl. GST): <strong style={{ color: colors.sageGreen }}>${(promoResult.finalPrice / 100).toFixed(2)}</strong></>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {isCustom && !isPrefill && (
-                  <div style={{
-                    padding: '16px',
-                    background: 'rgba(115,115,115,0.08)',
-                    border: '1px solid rgba(115,115,115,0.3)',
-                    borderRadius: '8px',
-                    marginBottom: '24px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                  }}>
-                    <span style={{ fontSize: '20px', flexShrink: 0 }}>✨</span>
-                    <div>
-                      <div style={{ fontFamily: fonts.body, fontSize: '15px', fontWeight: 500, color: colors.charcoal, marginBottom: '4px' }}>
-                        Custom Service
-                      </div>
-                      <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, lineHeight: 1.5 }}>
-                        We'll build a personalised quote based on your space and needs.
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {!isPrefill && !isCustom && (
                 <div ref={serviceSectionRef} style={{ marginBottom: '24px' }}>
                   <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '12px' }}>
                     SERVICE TYPE
@@ -1323,53 +1087,8 @@ export default function BookPage() {
                   </AnimatePresence>
                 </div>
 
-                )} {/* end !isPrefill service selector */}
-
-                {/* ── FREQUENCY SELECTOR (residential/business) or SERVICE SELECTOR (custom) ── */}
-                {isCustom && !isPrefill ? (
-                  /* ── SELECT SERVICES — custom mode multi-select ── */
-                  <div ref={serviceSectionRef} style={{ marginBottom: '32px' }}>
-                    <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '16px' }}>
-                      SELECT SERVICES
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      {([
-                        'Service type A',
-                        'Service type B',
-                        'Service type C',
-                        'Service type D',
-                        'Custom / Other',
-                      ] as const).map(svc => {
-                        const isActive = customServices.includes(svc);
-                        return (
-                          <button
-                            key={svc}
-                            onClick={() => setCustomServices(prev =>
-                              prev.includes(svc) ? prev.filter(s => s !== svc) : [...prev, svc]
-                            )}
-                            style={{
-                              padding: '12px 18px',
-                              background: isActive ? colors.sageGreen : colors.white,
-                              border: `1px solid ${isActive ? colors.sageGreen : colors.stone}`,
-                              borderRadius: '20px',
-                              cursor: 'pointer',
-                              transition: 'all 0.15s ease',
-                              fontFamily: fonts.body,
-                              fontSize: '14px',
-                              fontWeight: isActive ? 500 : 400,
-                              color: isActive ? '#000000' : colors.charcoal,
-                              letterSpacing: '0.01em',
-                            }}
-                          >
-                            {svc}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  /* ── HOW OFTEN? — residential / business / prefill mode ── */
-                  <div style={{ marginBottom: '32px' }}>
+                {/* ── FREQUENCY SELECTOR ── */}
+                <div style={{ marginBottom: '32px' }}>
                     <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '16px' }}>
                       HOW OFTEN?
                     </div>
@@ -1412,7 +1131,6 @@ export default function BookPage() {
                       })}
                     </div>
                   </div>
-                )}
 
                 {/* Calendar header */}
                 <div ref={scheduleSectionRef}>
@@ -1643,47 +1361,12 @@ export default function BookPage() {
 
             {step === 3 && (
               <>
-                {/* ── CUSTOM QUOTE MODE ── */}
-                {isCustom ? (
-                  <QuoteIntakeForm
-                    name={contactName}
-                    onNameChange={setContactName}
-                    email={contactEmail}
-                    onEmailChange={setContactEmail}
-                    phone={contactPhone}
-                    onPhoneChange={setContactPhone}
-                    serviceAddress={serviceAddress}
-                    onAddressChange={setServiceAddress}
-                    onAddressSelect={(r: AddressResult) => {
-                      setServiceAddress(r.formatted);
-                      setServiceAddressCoords({ lat: r.lat, lng: r.lng });
-                    }}
-                    unitNumber={unitNumber}
-                    onUnitChange={setUnitNumber}
-                    customServices={customServices}
-                    sizeKey={selectedSize}
-                    pendingDropFiles={pendingDropFiles}
-                    onDropFilesConsumed={() => setPendingDropFiles([])}
-                    selectedDate={selections[0] ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day}, ${selections[0].year}` : undefined}
-                    selectedTime={selections[0]?.time ?? undefined}
-                    onSuccess={({ email: e, name: n }) => {
-                      const primarySel = selections[0];
-                      const quoteDateTime = primarySel
-                        ? `${MONTH_NAMES[primarySel.month]} ${primarySel.day}, ${primarySel.year}${primarySel.time ? ` at ${primarySel.time}` : ''}`
-                        : '';
-                      navigate('/booking-success', {
-                        state: { mode: 'quote', email: e, name: n, service: 'Custom Quote', dateTime: quoteDateTime, frequency: '', total: 'Quote Requested', isFree: false },
-                      });
-                    }}
-                  />
-                ) : (
-                  <>
                 {/* ── Mobile inline order summary (step 3, ≤900px) ── */}
                 <div className="book-mobile-order-summary">
                   <div style={{ background: colors.white, border: `1px solid ${colors.stone}`, borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
                     <div style={{ ...typography.sectionLabel, fontSize: '11px', color: colors.warmGray, marginBottom: '10px' }}>ORDER SUMMARY</div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal }}>{(isCustom || selectedPkg === 'Custom') ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness && !isCustom && selectedPkg !== 'Custom' ? ' (Business)' : ''}</span>
+                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal }}>{PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness ? ' (Business)' : ''}</span>
                       <span style={{ fontFamily: fonts.body, fontSize: '14px', fontWeight: 500, color: colors.charcoal }}>${basePrice}</span>
                     </div>
                     {sortedSelections[0] && (
@@ -2150,8 +1833,6 @@ export default function BookPage() {
                 }}>
                   {site.booking.checkout.termsAcknowledgment}
                 </p>
-                  </>
-                )}
               </>
             )}
           </div>
@@ -2166,38 +1847,13 @@ export default function BookPage() {
             <div style={sidebarCard}>
               <div style={sidebarLabel}>SERVICE</div>
               <div style={{ ...sidebarValue, fontWeight: 500 }}>
-                {(isPrefill && quoteId) || isCustom || selectedPkg === 'Custom' ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness && !isPrefill && !isCustom && selectedPkg !== 'Custom' ? ' (Business)' : ''}
+                {PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness ? ' (Business)' : ''}
               </div>
-              {!isPrefill && !isCustom && (
               <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '2px' }}>
                 ${basePrice} per visit
               </div>
-              )}
-              {isCustom && (
-              <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {customServices.length > 0
-                  ? customServices.map(s => (
-                      <span key={s} style={{
-                        fontFamily: fonts.body,
-                        fontSize: '12px',
-                        color: colors.sageGreen,
-                        background: 'rgba(115,115,115,0.1)',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        border: '1px solid rgba(115,115,115,0.25)',
-                      }}>{s}</span>
-                    ))
-                  : <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>Select services above</span>
-                }
-              </div>
-              )}
-              {isPrefill && promoResult?.valid && promoResult.finalPrice != null && (
-              <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.sageGreen, marginTop: '2px', fontWeight: 500 }}>
-                Approved: ${(promoResult.finalPrice / 100).toFixed(2)} (incl. GST)
-              </div>
-              )}
               <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '8px', lineHeight: 1.5, fontStyle: 'italic' }}>
-                {isCustom || selectedPkg === 'Custom' ? site.booking.checkout.customQuoteSidebar : SERVICE_DESC[selectedPkg as Pkg]}
+                {SERVICE_DESC[selectedPkg as Pkg]}
               </div>
               {step === 3 && (
                 <div style={{ marginTop: '10px', borderTop: `1px solid ${colors.stone}`, paddingTop: '10px' }}>
@@ -2214,8 +1870,7 @@ export default function BookPage() {
               )}
             </div>
 
-            {/* Frequency card — hidden in custom mode */}
-            {!isCustom && (
+            {/* Frequency card */}
             <div style={sidebarCard}>
               <div style={sidebarLabel}>FREQUENCY</div>
               <div style={{ ...sidebarValue, fontWeight: 500 }}>{frequencyDiscounts[frequency].label}</div>
@@ -2235,7 +1890,6 @@ export default function BookPage() {
                 </div>
               )}
             </div>
-            )}
 
             {/* Schedule card */}
             <div style={sidebarCard}>
@@ -2305,8 +1959,8 @@ export default function BookPage() {
               </div>
             )}
 
-            {/* Pricing breakdown on checkout — hidden in custom mode */}
-            {step === 3 && !isCustom && (
+            {/* Pricing breakdown on checkout */}
+            {step === 3 && (
               <div style={{ borderTop: `1px solid ${colors.stone}`, marginTop: '8px', paddingTop: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>
@@ -2365,7 +2019,7 @@ export default function BookPage() {
                   disabled={!canProceedToCheckout}
                   onClick={attemptContinueToStep3}
                 >
-                  {isCustom ? 'Continue to Quote Form →' : 'Continue to Checkout →'}
+                  Continue to Checkout →
                 </Button>
               </div>
             )}
@@ -2380,17 +2034,12 @@ export default function BookPage() {
         <div className="book-mobile-bar">
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: fonts.body, fontSize: '14px', fontWeight: 500, color: colors.charcoal, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {(isCustom || selectedPkg === 'Custom') ? 'Custom Quote' : PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness && !isCustom && selectedPkg !== 'Custom' ? ' (Business)' : ''}
+              {PKG_DISPLAY_NAME[selectedPkg as Pkg]}{isBusiness ? ' (Business)' : ''}
             </div>
             <div style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray, marginTop: '2px' }}>
-              {isCustom
-                ? (scheduleComplete && selections[0]?.time
-                    ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day} · ${selections[0].time}`
-                    : 'Custom Quote')
-                : (scheduleComplete && selections[0]?.time
-                    ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day} · ${selections[0].time} · $${grandTotal.toFixed(2)}`
-                    : `$${basePrice} per visit`)
-              }
+              {scheduleComplete && selections[0]?.time
+                ? `${MONTH_NAMES[selections[0].month]} ${selections[0].day} · ${selections[0].time} · $${grandTotal.toFixed(2)}`
+                : `$${basePrice} per visit`}
             </div>
           </div>
           <div style={{ flexShrink: 0 }}>
@@ -2400,12 +2049,10 @@ export default function BookPage() {
               disabled={!canProceedToCheckout}
               onClick={attemptContinueToStep3}
             >
-              {isCustom ? 'Quote Form →' : 'Continue →'}
+              Continue →
             </Button>
           </div>
         </div>
-      )}
-        </>
       )}
     </div>
 

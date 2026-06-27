@@ -54,3 +54,27 @@ export function endTimeLabel(startHour: number, durationHours: number): string {
   const minStr = endMin > 0 ? `:${String(endMin).padStart(2, '0')}` : ':00';
   return `${displayHour}${minStr} ${isPM ? 'PM' : 'AM'}`;
 }
+
+const SCHEMA_DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+function hourToSchemaTime(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`;
+}
+
+/** schema.org OpeningHoursSpecification for LocalBusiness JSON-LD */
+export function getSchemaOpeningHoursSpecification(): Record<string, unknown>[] {
+  return [{
+    '@type': 'OpeningHoursSpecification',
+    dayOfWeek: BOOKABLE_DAYS_OF_WEEK.map((d) => SCHEMA_DAY_NAMES[d]),
+    opens: hourToSchemaTime(BUSINESS_START_HOUR),
+    closes: hourToSchemaTime(BUSINESS_END_HOUR),
+  }];
+}

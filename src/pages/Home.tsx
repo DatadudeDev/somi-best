@@ -45,7 +45,10 @@ export default function HomePage() {
 
   useEffect(() => {
     fetch('/api/google-rating')
-      .then(r => r.json() as Promise<{ rating: number; reviewCount: number; url: string }>)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('google-rating unavailable');
+        return r.json() as Promise<{ rating: number; reviewCount: number; url: string }>;
+      })
       .then(data => setGoogleRating(data))
       .catch(() => setGoogleRating({ rating: 5.0, reviewCount: 15, url: GOOGLE_PROFILE_URL }));
   }, [GOOGLE_PROFILE_URL]);
@@ -54,7 +57,10 @@ export default function HomePage() {
 
   useEffect(() => {
     fetch('/api/google-reviews')
-      .then(r => r.json() as Promise<{ reviews: Array<{ author_name: string; text: string; relative_time_description: string }> }>)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('google-reviews unavailable');
+        return r.json() as Promise<{ reviews: Array<{ author_name: string; text: string; relative_time_description: string }> }>;
+      })
       .then(data => {
         if (data.reviews && data.reviews.length >= 3) {
           setLiveTestimonials(data.reviews.map(r => ({

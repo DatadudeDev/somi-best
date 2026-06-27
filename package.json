@@ -11,6 +11,7 @@
     "typecheck": "tsc -b",
     "generate:placeholders": "node scripts/generate-placeholders.mjs",
     "generate:favicons": "node scripts/generate-favicons.mjs",
+    "generate:og-image": "node scripts/generate-og-image.mjs",
     "download:hero-images": "node scripts/download-hero-images.mjs"
   },
   "dependencies": {

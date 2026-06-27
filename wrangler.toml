@@ -9,6 +9,9 @@ pages_build_output_dir = "dist"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+[limits]
+cpu_ms = 5_000
+
 # D1 — BEST's own tenant database (somi-db-00mqu4...), seeded with the booking/payments
 # schema (customers, bookings, promo_codes, blocked_dates, settings, transactions)
 # alongside the tenant operational tables.
@@ -49,5 +52,7 @@ BUSINESS_CALL_LABEL = "Call BEST Therapy"
 # ── Secrets (set via the Pages dashboard, never committed; persist across deploys) ──
 #   CLIENT_USER_ID            Tenant ULID (00mqu4ornuynwbv8cm36kbh0zp)
 #   INTERNAL_CALLBACK_SECRET  HMAC shared secret with somi-payments for booking callbacks
-# Frontend build var (baked into the bundle at build time, via .env.production):
+#   TURNSTILE_SECRET_KEY      Pairs with VITE_TURNSTILE_SITE_KEY in .env.production
+# Frontend build vars (Vite — NOT wrangler [vars]; see .env.production):
 #   VITE_USE_BOOKING_API=true Switches the booking form off mock data
+#   VITE_TURNSTILE_SITE_KEY   Public Turnstile site key (browser widget)

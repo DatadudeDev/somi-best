@@ -47,11 +47,9 @@ import {
 import { getDuration } from '../../../src/lib/booking/constants.ts';
 
 import { useCentralPayments, createCentralIntent } from '../../../src/lib/server/payments.ts';
-
-
+import { contactFieldsComplete, verifyTurnstileForContact } from '../../../src/lib/server/turnstile.ts';
 
 interface CreateIntentBody {
-
   name?: string;
 
   email?: string;
@@ -88,46 +86,6 @@ interface CreateIntentBody {
 
 }
 
-
-
-async function verifyTurnstile(secret: string, token: string, ip: string): Promise<boolean> {
-
-  try {
-
-    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-
-      method: 'POST',
-
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-
-      body: new URLSearchParams({ secret, response: token, remoteip: ip }).toString(),
-
-    });
-
-    const data = await res.json() as { success: boolean };
-
-    return data.success;
-
-  } catch (err) {
-
-    console.warn('[create-intent] turnstile verify failed (soft-passing):', err);
-
-    return true;
-
-  }
-
-}
-
-
-
-function contactComplete(body: CreateIntentBody): boolean {
-
-  return !!(body.name?.trim() && body.email?.trim() && body.phone?.trim());
-
-}
-
-
-
 export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   try {
@@ -156,14 +114,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
 
 
-    if (env.TURNSTILE_SECRET_KEY && contactComplete(body)) {
-
+    if (env.TURNSTILE_SECRET_KEY && contactFieldsComplete(body.name, body.email, body.phone)) {
       const ip = context.request.headers.get('CF-Connecting-IP') ?? '';
-
-      const ok = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, body.turnstileToken ?? '', ip);
-
+      const ok = await verifyTurnstileForContact(
+        env,
+        body.turnstileToken,
+        ip,
+        body.name,
+        body.email,
+        body.phone,
+      );
       if (!ok) return jsonError('Bot verification failed. Please refresh and try again.', 403);
-
     }
 
 

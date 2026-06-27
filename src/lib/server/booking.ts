@@ -578,7 +578,6 @@ export function buildEmailMetadata(
   p: BookingWritePayload,
   config: BookingConfig,
 ): Record<string, string> {
-  const subtotalCents = p.basePriceCents + p.addOnTotalCents;
   const afterDiscount = Math.max(0, p.totalCents);
   const taxCents = p.totalCents > 0 ? Math.round(afterDiscount * GST_RATE) : 0;
   const grandCents = afterDiscount + taxCents;
