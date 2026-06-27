@@ -43,7 +43,7 @@ import {
 import { getDuration } from '../../../src/lib/booking/constants.ts';
 
 import { useCentralPayments, updateCentralIntent } from '../../../src/lib/server/payments.ts';
-import { verifyTurnstileForContact } from '../../../src/lib/server/turnstile.ts';
+import { verifyTurnstileWhenProvided } from '../../../src/lib/server/turnstile.ts';
 
 
 
@@ -106,19 +106,10 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
     }
 
     const ip = context.request.headers.get('CF-Connecting-IP') ?? '';
-    const turnstileOk = await verifyTurnstileForContact(
-      env,
-      body.turnstileToken,
-      ip,
-      body.name,
-      body.email,
-      body.phone,
-    );
+    const turnstileOk = await verifyTurnstileWhenProvided(env, body.turnstileToken, ip);
     if (!turnstileOk) {
       return jsonError('Bot verification failed. Please refresh and try again.', 403);
     }
-
-
 
     const mode: BookingMode = body.mode === 'business' ? 'business' : 'individual';
 
@@ -199,6 +190,10 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
       ...buildIntentMetadata(payload),
 
       ...buildEmailMetadata(payload, config),
+
+      ...(body.turnstileToken?.trim() && env.TURNSTILE_SECRET_KEY
+        ? { turnstileVerified: 'true' }
+        : {}),
 
     };
 

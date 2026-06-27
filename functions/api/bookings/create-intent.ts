@@ -47,7 +47,6 @@ import {
 import { getDuration } from '../../../src/lib/booking/constants.ts';
 
 import { useCentralPayments, createCentralIntent } from '../../../src/lib/server/payments.ts';
-import { contactFieldsComplete, verifyTurnstileForContact } from '../../../src/lib/server/turnstile.ts';
 
 interface CreateIntentBody {
   name?: string;
@@ -111,23 +110,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
 
     const mode: BookingMode = body.mode === 'business' ? 'business' : 'individual';
-
-
-
-    if (env.TURNSTILE_SECRET_KEY && contactFieldsComplete(body.name, body.email, body.phone)) {
-      const ip = context.request.headers.get('CF-Connecting-IP') ?? '';
-      const ok = await verifyTurnstileForContact(
-        env,
-        body.turnstileToken,
-        ip,
-        body.name,
-        body.email,
-        body.phone,
-      );
-      if (!ok) return jsonError('Bot verification failed. Please refresh and try again.', 403);
-    }
-
-
 
     const resolved = resolveService(service, sizeKey, mode);
 

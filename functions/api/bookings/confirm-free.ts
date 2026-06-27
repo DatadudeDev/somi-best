@@ -20,7 +20,7 @@ import {
   type BookingMode,
 } from '../../../src/lib/server/booking.ts';
 import { getDuration } from '../../../src/lib/booking/constants.ts';
-import { verifyTurnstileForContact } from '../../../src/lib/server/turnstile.ts';
+import { verifyTurnstileIfConfigured } from '../../../src/lib/server/turnstile.ts';
 
 interface ConfirmFreeBody {
   name?: string;
@@ -53,14 +53,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonError('date must be YYYY-MM-DD');
 
     const ip = context.request.headers.get('CF-Connecting-IP') ?? '';
-    const turnstileOk = await verifyTurnstileForContact(
-      env,
-      body.turnstileToken,
-      ip,
-      name,
-      email,
-      phone,
-    );
+    const turnstileOk = await verifyTurnstileIfConfigured(env, body.turnstileToken, ip);
     if (!turnstileOk) {
       return jsonError('Bot verification failed. Please refresh and try again.', 403);
     }

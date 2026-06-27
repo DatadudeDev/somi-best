@@ -13,6 +13,7 @@ import { resolveConfig } from '../../../src/lib/server/config.ts';
 import { jsonOk, jsonError } from '../../../src/lib/server/http.ts';
 import { extractBookingFromMetadata, writeBooking } from '../../../src/lib/server/booking.ts';
 import { useCentralPayments, retrieveCentralIntent } from '../../../src/lib/server/payments.ts';
+import { hasTurnstileVerification } from '../../../src/lib/server/turnstile.ts';
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
@@ -26,6 +27,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const cpi = await retrieveCentralIntent(env, body.paymentIntentId);
       if (cpi.status !== 'succeeded') {
         return jsonError(`Payment has not succeeded yet (status: ${cpi.status}). Please wait a moment and try again.`, 402);
+      }
+      if (!hasTurnstileVerification(env, cpi.metadata ?? {})) {
+        return jsonError('Bot verification required before completing booking.', 403);
       }
       const cPayload = extractBookingFromMetadata(cpi.metadata ?? {}, body.paymentIntentId, '');
       if (!cPayload) {
@@ -47,11 +51,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return jsonError(`Payment has not succeeded yet (status: ${pi.status}). Please wait a moment and try again.`, 402);
     }
 
+    const piMeta = (pi.metadata ?? {}) as Record<string, string>;
+    if (!hasTurnstileVerification(env, piMeta)) {
+      return jsonError('Bot verification required before completing booking.', 403);
+    }
+
     const stripeCustomerId = typeof pi.customer === 'string'
       ? pi.customer
       : (pi.customer as { id?: string } | null)?.id ?? '';
     const payload = extractBookingFromMetadata(
-      (pi.metadata ?? {}) as Record<string, string>,
+      piMeta,
       body.paymentIntentId,
       stripeCustomerId,
     );

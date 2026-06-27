@@ -572,21 +572,10 @@ export default function BookPage() {
     }
   };
 
-  const syncPaymentIntent = useCallback(async (): Promise<boolean> => {
+  const syncPaymentIntent = useCallback(async (turnstileToken?: string): Promise<boolean> => {
     if (!paymentIntentId || isFreeBooking) return true;
     const built = buildCheckoutPayload();
     if (!built) return false;
-
-    let turnstileToken: string | undefined;
-    if (turnstileEnabled && contactValid) {
-      try {
-        turnstileToken = await getToken();
-      } catch {
-        setIntentError('Bot verification failed. Please refresh and try again.');
-        resetTurnstile();
-        return false;
-      }
-    }
 
     try {
       const res = await fetch('/api/bookings/update-intent', {
@@ -609,7 +598,22 @@ export default function BookPage() {
       setIntentError('Network error while preparing payment.');
       return false;
     }
-  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload, turnstileEnabled, contactValid, getToken, resetTurnstile]);
+  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload, resetTurnstile]);
+
+  /** Run immediately before Stripe charge — verifies Turnstile and stamps PI metadata. */
+  const preparePaymentWithTurnstile = useCallback(async (): Promise<boolean> => {
+    if (turnstileEnabled) {
+      try {
+        const token = await getToken();
+        return syncPaymentIntent(token);
+      } catch {
+        setIntentError('Bot verification failed. Please refresh and try again.');
+        resetTurnstile();
+        return false;
+      }
+    }
+    return syncPaymentIntent();
+  }, [turnstileEnabled, getToken, syncPaymentIntent, resetTurnstile]);
 
   const intentBootstrapReady = step === 3
     && !checkoutInitialized
@@ -1815,7 +1819,7 @@ export default function BookPage() {
                       billingAddress={billingAddress}
                       onBillingAddressChange={setBillingAddress}
                       paymentError={paymentError}
-                      onBeforeConfirm={syncPaymentIntent}
+                      onBeforeConfirm={preparePaymentWithTurnstile}
                       onSuccess={handlePaymentSuccess}
                       onError={setIntentError}
                     />
@@ -2057,7 +2061,7 @@ export default function BookPage() {
     </div>
 
       {/* Cloudflare Turnstile — invisible bot protection */}
-      <div ref={turnstileRef} style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', opacity: 0, pointerEvents: 'none', top: 0, left: 0 }} aria-hidden="true" />
+      <div ref={turnstileRef} aria-hidden="true" />
     </>
   );
 }

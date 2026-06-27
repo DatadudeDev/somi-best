@@ -62,6 +62,9 @@ export const site = {
   googleProfileUrl:
     'https://search.google.com/local/writereview?placeid=ChIJE2UmPeB7cVMRIuvzfkwQuyg',
 
+  /** Live Google rating/reviews API — off until Places integration is wired */
+  googleReviewsApiEnabled: import.meta.env.VITE_ENABLE_GOOGLE_REVIEWS_API === 'true',
+
   services: {
     sectionLabel: 'Recovery Protocols',
     headline: 'Pick your protocol.',

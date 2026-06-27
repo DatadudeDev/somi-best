@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_BOOKING_REQUIRES_ADDRESS?: string;
   readonly VITE_GOOGLE_MAPS_API_KEY?: string;
   readonly VITE_TURNSTILE_SITE_KEY?: string;
+  readonly VITE_ENABLE_GOOGLE_REVIEWS_API?: string;
 }
 
 interface ImportMeta {

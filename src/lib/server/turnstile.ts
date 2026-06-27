@@ -32,6 +32,37 @@ export async function verifyTurnstile(
   }
 }
 
+/** Skip when no token (debounced cart sync). Verify fail-closed when token is supplied. */
+export async function verifyTurnstileWhenProvided(
+  env: { TURNSTILE_SECRET_KEY?: string },
+  token: string | undefined,
+  ip: string,
+): Promise<boolean> {
+  if (!env.TURNSTILE_SECRET_KEY) return true;
+  if (!token?.trim()) return true;
+  return verifyTurnstile(env.TURNSTILE_SECRET_KEY, token, ip);
+}
+
+/** Required at booking submission when Turnstile is enabled. */
+export async function verifyTurnstileIfConfigured(
+  env: { TURNSTILE_SECRET_KEY?: string },
+  token: string | undefined,
+  ip: string,
+): Promise<boolean> {
+  if (!env.TURNSTILE_SECRET_KEY) return true;
+  if (!token?.trim()) return false;
+  return verifyTurnstile(env.TURNSTILE_SECRET_KEY, token, ip);
+}
+
+/** Booking submission requires prior verified update-intent metadata when Turnstile is on. */
+export function hasTurnstileVerification(
+  env: { TURNSTILE_SECRET_KEY?: string },
+  metadata: Record<string, string | undefined>,
+): boolean {
+  if (!env.TURNSTILE_SECRET_KEY) return true;
+  return metadata.turnstileVerified === 'true';
+}
+
 /** Returns false when verification fails; true when skipped or passed. */
 export async function verifyTurnstileForContact(
   env: { TURNSTILE_SECRET_KEY?: string },

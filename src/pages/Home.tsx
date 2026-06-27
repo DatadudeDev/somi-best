@@ -38,24 +38,28 @@ interface Testimonial {
 export default function HomePage() {
   useSEO(seoMeta.home);
 
-  // ── Live Google rating ─────────────────────────────────────────────────────
-  // PLACEHOLDER (reskin): Google Business Profile URL for reviews badge
+  // ── Live Google rating (disabled until VITE_ENABLE_GOOGLE_REVIEWS_API=true) ──
   const GOOGLE_PROFILE_URL = site.googleProfileUrl;
-  const [googleRating, setGoogleRating] = useState<{ rating: number; reviewCount: number; url: string } | null>(null);
+  const defaultGoogleRating = { rating: 5.0, reviewCount: 15, url: GOOGLE_PROFILE_URL };
+  const [googleRating, setGoogleRating] = useState<{ rating: number; reviewCount: number; url: string } | null>(
+    site.googleReviewsApiEnabled ? null : defaultGoogleRating,
+  );
 
   useEffect(() => {
+    if (!site.googleReviewsApiEnabled) return;
     fetch('/api/google-rating')
       .then(async (r) => {
         if (!r.ok) throw new Error('google-rating unavailable');
         return r.json() as Promise<{ rating: number; reviewCount: number; url: string }>;
       })
       .then(data => setGoogleRating(data))
-      .catch(() => setGoogleRating({ rating: 5.0, reviewCount: 15, url: GOOGLE_PROFILE_URL }));
+      .catch(() => setGoogleRating(defaultGoogleRating));
   }, [GOOGLE_PROFILE_URL]);
 
   const [liveTestimonials, setLiveTestimonials] = useState<Testimonial[] | null>(null);
 
   useEffect(() => {
+    if (!site.googleReviewsApiEnabled) return;
     fetch('/api/google-reviews')
       .then(async (r) => {
         if (!r.ok) throw new Error('google-reviews unavailable');

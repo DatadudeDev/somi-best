@@ -28,7 +28,7 @@ interface TurnstileOptions {
   'expired-callback'?: () => void;
   execution?: 'render' | 'execute';
   appearance?: 'always' | 'execute' | 'interaction-only';
-  size?: 'normal' | 'compact' | 'flexible';
+  size?: 'normal' | 'compact' | 'flexible' | 'invisible';
   theme?: 'light' | 'dark' | 'auto';
   action?: string;
 }
@@ -74,8 +74,8 @@ export function useTurnstile(action = 'booking', enabled = true) {
 
     widgetIdRef.current = window.turnstile.render(containerRef.current, {
       sitekey: SITE_KEY,
+      size: 'invisible',
       execution: 'execute',
-      appearance: 'interaction-only',
       theme: 'light',
       action,
       callback: resolveWaiters,
@@ -91,9 +91,7 @@ export function useTurnstile(action = 'booking', enabled = true) {
         resolversRef.current = [];
       },
     });
-
-    executeWidget();
-  }, [action, executeWidget, finishExecution, resolveWaiters]);
+  }, [action, finishExecution, resolveWaiters]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -123,7 +121,7 @@ export function useTurnstile(action = 'booking', enabled = true) {
     };
   }, [mountWidget, enabled]);
 
-  const getToken = useCallback((timeoutMs = 10_000): Promise<string> => {
+  const getToken = useCallback((timeoutMs = 15_000): Promise<string> => {
     if (tokenRef.current) {
       return Promise.resolve(tokenRef.current);
     }
