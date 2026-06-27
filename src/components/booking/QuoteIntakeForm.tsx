@@ -5,7 +5,8 @@ import { useState } from 'react';
 import { site } from '../../config/site';
 import { colors, fonts, typography } from '../../styles/tokens';
 import Button from '../ui/Button';
-import AddressAutocomplete, { type AddressResult } from '../ui/AddressAutocomplete';
+import PhoneInput from '../ui/PhoneInput';
+import LazyAddressField, { type AddressResult } from '../ui/LazyAddressField';
 
 export interface QuoteIntakeFormProps {
   name: string;
@@ -137,13 +138,11 @@ export default function QuoteIntakeForm({
           style={inputStyle}
           required
         />
-        <input
-          placeholder="+1 (XXX) XXX-XXXX"
+        <PhoneInput
           value={phone}
-          onChange={e => onPhoneChange(e.target.value)}
-          style={inputStyle}
+          onChange={onPhoneChange}
         />
-        <AddressAutocomplete
+        <LazyAddressField
           value={serviceAddress}
           onChange={onAddressChange}
           onSelect={onAddressSelect}

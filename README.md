@@ -21,11 +21,13 @@ npm run generate:favicons
 
 Source: `public/images/best/logo-wordmark.png`
 
-Hero slideshow JPEGs live under `public/images/best/hero/` (self-hosted for CSP). Re-download:
+Hero slideshow WebP files live under `public/images/best/hero/` (self-hosted for CSP). Re-download:
 
 ```bash
 npm run download:hero-images
 ```
+
+See `RESKIN.md` for per-client domain, email, and wrangler vars.
 
 ## vs `BEST/`
 

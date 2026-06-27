@@ -152,27 +152,27 @@ const HERO = '/images/best/hero';
 
 export const heroSlides = [
   {
-    src: `${HERO}/hero-01-athlete-training.jpg`,
+    src: `${HERO}/hero-01-athlete-training.webp`,
     alt: 'Athlete training intensely',
     effect: 'zoom-pan-left' as HeroSlideEffect,
   },
   {
-    src: `${HERO}/hero-02-gym.jpg`,
+    src: `${HERO}/hero-02-gym.webp`,
     alt: 'Gym recovery environment',
     effect: 'zoom-pan-right' as HeroSlideEffect,
   },
   {
-    src: `${HERO}/hero-03-weight-room.jpg`,
+    src: `${HERO}/hero-03-weight-room.webp`,
     alt: 'Weight room athlete',
     effect: 'zoom-pan-up' as HeroSlideEffect,
   },
   {
-    src: `${HERO}/hero-04-sports-therapy.jpg`,
+    src: `${HERO}/hero-04-sports-therapy.webp`,
     alt: 'Sports therapy session',
     effect: 'zoom-pan-down' as HeroSlideEffect,
   },
   {
-    src: `${HERO}/hero-05-stretching.jpg`,
+    src: `${HERO}/hero-05-stretching.webp`,
     alt: 'Athlete stretching recovery',
     effect: 'zoom-out-pan-right' as HeroSlideEffect,
   },

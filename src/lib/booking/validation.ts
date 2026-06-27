@@ -15,6 +15,23 @@ export function formatPhoneNumber(raw: string): string {
   return `+1 (${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6,10)}`;
 }
 
+/** National number portion for display beside a fixed +1 prefix. */
+export function phoneNationalDisplay(full: string): string {
+  const digits = full.replace(/\D/g, '');
+  const d = digits.startsWith('1') ? digits.slice(1) : digits;
+  if (d.length === 0) return '';
+  if (d.length <= 3) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6, 10)}`;
+}
+
+/** Build full +1 formatted value from national input edits. */
+export function phoneFromNationalInput(nationalRaw: string): string {
+  const digits = nationalRaw.replace(/\D/g, '').slice(0, 10);
+  if (digits.length === 0) return '+1 ';
+  return formatPhoneNumber(`1${digits}`);
+}
+
 export function validateName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return 'Full name is required';

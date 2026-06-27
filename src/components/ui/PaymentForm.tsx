@@ -2,9 +2,23 @@ import { useState } from 'react';
 import { PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { colors, fonts } from '../../styles/tokens';
 
+interface BillingDetails {
+  name: string;
+  email: string;
+  phone: string;
+}
+
+function phoneForStripe(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (!digits) return phone.trim();
+  return digits.length === 10 ? `+1${digits}` : `+${digits}`;
+}
+
 interface PaymentFormProps {
   /** Return URL after successful payment confirmation */
   returnUrl: string;
+  /** Contact info from step 2 — passed to confirmPayment (fields hidden in PaymentElement) */
+  billingDetails: BillingDetails;
   /** Called when confirmPayment succeeds (booking confirmed client-side) */
   onSuccess?: () => void;
   /** Called when confirmPayment fails */
@@ -23,6 +37,7 @@ interface PaymentFormProps {
 
 export default function PaymentForm({
   returnUrl,
+  billingDetails,
   onSuccess,
   onError,
   onBeforeConfirm,
@@ -51,9 +66,27 @@ export default function PaymentForm({
       }
     }
 
+    const { error: submitError } = await elements.submit();
+    if (submitError) {
+      const msg = submitError.message ?? 'Please check your payment details.';
+      setErrorMessage(msg);
+      onError?.(msg);
+      setLoading(false);
+      return;
+    }
+
     const { error } = await stripe.confirmPayment({
       elements,
-      confirmParams: { return_url: returnUrl },
+      confirmParams: {
+        return_url: returnUrl,
+        payment_method_data: {
+          billing_details: {
+            name: billingDetails.name.trim(),
+            email: billingDetails.email.trim(),
+            phone: phoneForStripe(billingDetails.phone),
+          },
+        },
+      },
       redirect: 'if_required',
     });
 
@@ -63,7 +96,6 @@ export default function PaymentForm({
       onError?.(msg);
       setLoading(false);
     } else {
-      // redirect: 'if_required' means 3DS was not needed; payment succeeded in-place
       onSuccess?.();
       setLoading(false);
     }
@@ -77,6 +109,16 @@ export default function PaymentForm({
         id="stripe-payment-element"
         options={{
           layout: 'tabs',
+          wallets: { applePay: 'auto', googlePay: 'auto', link: 'never' },
+          fields: {
+            billingDetails: {
+              name: 'never',
+              email: 'never',
+              phone: 'never',
+              // Card networks may require postal — collect in-element instead of confirmParams
+              address: 'if_required',
+            },
+          },
         }}
       />
 
@@ -160,4 +202,3 @@ function Spinner() {
     </svg>
   );
 }
-

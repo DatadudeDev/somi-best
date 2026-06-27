@@ -1,4 +1,4 @@
-# wrangler.toml — Cloudflare Pages bindings for DatadudeDev/somi-best (BEST Therapeutics).
+# wrangler.toml — Cloudflare Pages bindings for DatadudeDev/somi-best (BEST Therapy).
 # Per-client deploy of the somi-full-template website. Bindings are PINNED to this
 # client's tenant resources so git-connected Pages deployments never reset them to
 # template defaults (the prior bug: every push reverted DB/R2 to template and dropped
@@ -34,13 +34,17 @@ ENVIRONMENT = "production"
 CURRENCY = "cad"
 TIMEZONE = "America/Edmonton"
 FROM_EMAIL = "bookings@somi.ceo"
-BUSINESS_NAME = "BEST Therapeutics"
+BUSINESS_NAME = "BEST Therapy"
 BUSINESS_NOTIFY_EMAIL = "stanierg@gmail.com"
 REPLY_TO_EMAIL = "hello@treytherapy.com"
 USE_CENTRAL_PAYMENTS = "true"
 BOOKING_REQUIRES_ADDRESS = "false"
-SITE_ORIGIN = "https://besttherapeutics.com"
+SITE_ORIGIN = "https://treytherapy.com"
+EMAIL_LOGO_URL = "https://treytherapy.com/images/best/logo-wordmark.png"
 EMAIL_LOCATION_LABEL = "Calgary, AB"
+PLACE_ID = "ChIJE2UmPeB7cVMRIuvzfkwQuyg"
+BUSINESS_PHONE = "+14033999154"
+BUSINESS_CALL_LABEL = "Call BEST Therapy"
 
 # ── Secrets (set via the Pages dashboard, never committed; persist across deploys) ──
 #   CLIENT_USER_ID            Tenant ULID (00mqu4ornuynwbv8cm36kbh0zp)

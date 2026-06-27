@@ -3,4 +3,4 @@ Allow: /
 
 Disallow: /api/
 
-Sitemap: https://example.com/sitemap.xml
+Sitemap: https://treytherapy.com/sitemap.xml

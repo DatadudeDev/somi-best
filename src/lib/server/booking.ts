@@ -14,8 +14,11 @@ import {
   getAvailableStartHours,
   getBasePriceForMode,
   calcAddOnTotal,
+  ADDON_PRICES,
   BIZ_SERVICE_PREFIX,
 } from '../booking/constants.ts';
+import { PKG_DISPLAY_NAME, type Pkg, addOns, frequencyDiscounts, type Frequency } from '../../data/pricing.ts';
+import { serializeEmailTheme } from './email-theme.ts';
 
 export type BookingMode = 'individual' | 'business';
 
@@ -38,11 +41,11 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const TIER_DISPLAY: Record<string, string> = {
-  tier1: 'Tier 1',
-  tier2: 'Tier 2',
-  tier3: 'Tier 3',
-  tier4: 'Tier 4',
+const TIER_TO_PKG: Record<string, Pkg> = {
+  tier1: 'Tier1',
+  tier2: 'Tier2',
+  tier3: 'Tier3',
+  tier4: 'Tier4',
 };
 
 const VALID_SERVICE_KEYS = new Set(['tier1', 'tier2', 'tier3', 'tier4']);
@@ -87,17 +90,70 @@ export function formatDateLabel(dateStr: string): string {
   return `${name} ${d}, ${y}`;
 }
 
-/** "biz_tier1" -> "Business Tier 1"; "tier1" -> "Tier 1". */
+/** "biz_tier1" -> "Business Foundation"; "tier1" -> "Foundation". */
 export function serviceLabel(serviceKey: string): string {
   const isBiz = serviceKey.startsWith(BIZ_SERVICE_PREFIX);
   const base = isBiz ? serviceKey.slice(BIZ_SERVICE_PREFIX.length) : serviceKey;
-  const label = TIER_DISPLAY[base] ?? base.charAt(0).toUpperCase() + base.slice(1);
+  const pkg = TIER_TO_PKG[base];
+  const label = pkg ? PKG_DISPLAY_NAME[pkg] : base.charAt(0).toUpperCase() + base.slice(1);
   return isBiz ? `Business ${label}` : label;
 }
 
 export function formatMoney(cents: number, currency: string): string {
   const amount = (cents / 100).toFixed(2);
   return `$${amount} ${currency.toUpperCase()}`;
+}
+
+export const GST_RATE = 0.05;
+
+/** Pre-tax subtotal (cents) → GST-inclusive charge (cents), rounded. */
+export function preTaxCentsToChargeCents(preTaxCents: number): number {
+  if (preTaxCents <= 0) return 0;
+  return Math.round(preTaxCents * (1 + GST_RATE));
+}
+
+/** GST-inclusive charge (cents) → pre-tax subtotal (cents), rounded. */
+export function chargeCentsToPreTaxCents(chargeCents: number): number {
+  if (chargeCents <= 0) return 0;
+  return Math.round(chargeCents / (1 + GST_RATE));
+}
+
+function addonDisplayLabel(id: string): string {
+  return addOns.find((a) => a.id === id)?.label ?? id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Compact invoice line items for email/PDF relay (Stripe metadata ≤500 chars). */
+export function buildInvoiceMetadata(
+  p: BookingWritePayload,
+  config: BookingConfig,
+): Record<string, string> {
+  const addOnInputs: AddOnInput[] = JSON.parse(p.addOnsJson || '[]');
+  const lines: Array<{ label: string; qty: number; amountCents: number }> = [
+    { label: serviceLabel(p.serviceKey), qty: 1, amountCents: p.basePriceCents },
+  ];
+  for (const a of addOnInputs) {
+    const unitCents = Math.round((ADDON_PRICES[a.id] ?? 0) * 100);
+    const qty = a.quantity ?? 1;
+    if (unitCents > 0) {
+      lines.push({ label: addonDisplayLabel(a.id), qty, amountCents: unitCents * qty });
+    }
+  }
+
+  const subtotalCents = p.basePriceCents + p.addOnTotalCents;
+  const discountCents = Math.max(0, subtotalCents - p.totalCents);
+  const afterDiscount = Math.max(0, p.totalCents);
+  const taxCents = p.totalCents > 0 ? Math.round(afterDiscount * GST_RATE) : 0;
+  const grandCents = afterDiscount + taxCents;
+
+  return {
+    invLines: JSON.stringify(lines).slice(0, 490),
+    invSubCents: String(subtotalCents),
+    invDiscCents: String(discountCents),
+    invTaxCents: String(taxCents),
+    invGrandCents: String(grandCents),
+    invTaxPct: '5',
+    invCur: config.currency,
+  };
 }
 
 // ─── Service resolution ───────────────────────────────────────────
@@ -201,15 +257,25 @@ export interface Pricing {
   addOnTotalCents: number;
   discountPct: number;
   discountAmountCents: number;
+  /** Pre-tax subtotal after discounts (stored in D1 `bookings.total`). */
   totalCents: number;
+  /** GST portion of the Stripe charge. */
+  taxCents: number;
+  /** GST-inclusive amount charged on Stripe. */
+  chargeCents: number;
   promoCodeRow: PromoCodeRow | null;
 }
 
 export type PricingOutcome = { ok: true; pricing: Pricing } | { ok: false; error: string };
 
+export interface PricingOptions {
+  frequency?: string;
+  visitCount?: number;
+}
+
 /**
  * Compute booking price entirely server-side from the pricing source of truth.
- * Never trusts a client-supplied total. Applies an optional promo code.
+ * Never trusts a client-supplied total. Applies frequency + optional promo code.
  */
 export async function computePricing(
   db: D1Database,
@@ -218,13 +284,21 @@ export async function computePricing(
   mode: BookingMode,
   addOns: AddOnInput[],
   promoCode: string | undefined,
+  options: PricingOptions = {},
 ): Promise<PricingOutcome> {
+  const visitCount = Math.max(1, Math.min(options.visitCount ?? 1, 12));
+  const freqKey = (options.frequency ?? 'one-time') as Frequency;
+  const freqRate = frequencyDiscounts[freqKey]?.discount ?? 0;
+
   const basePrice = getBasePriceForMode(baseServiceKey, sizeKey, mode);
   const addOnTotal = calcAddOnTotal(addOns);
-  const subtotalDollars = basePrice + addOnTotal;
+  const perVisitSubtotal = basePrice + addOnTotal;
+  const frequencyDiscountPerVisit = Math.round(perVisitSubtotal * freqRate * 100) / 100;
+  const perVisitAfterFreq = perVisitSubtotal - frequencyDiscountPerVisit;
+  const subtotalDollars = perVisitAfterFreq * visitCount;
 
   let promoCodeRow: PromoCodeRow | null = null;
-  let discountDollars = 0;
+  let promoDiscountDollars = 0;
 
   if (promoCode) {
     promoCodeRow = await db
@@ -243,19 +317,28 @@ export async function computePricing(
     }
 
     if (promoCodeRow.type === 'percent_off') {
-      discountDollars = Math.round(subtotalDollars * (promoCodeRow.value / 100) * 100) / 100;
+      promoDiscountDollars = Math.round(subtotalDollars * (promoCodeRow.value / 100) * 100) / 100;
     } else if (promoCodeRow.type === 'fixed_off') {
-      discountDollars = promoCodeRow.value / 100;
+      promoDiscountDollars = promoCodeRow.value / 100;
     } else if (promoCodeRow.type === PROMO_TYPE_COMPLIMENTARY) {
-      discountDollars = subtotalDollars;
+      promoDiscountDollars = subtotalDollars;
     } else if (promoCodeRow.type === 'quote_price') {
-      discountDollars = Math.max(0, subtotalDollars - promoCodeRow.value / 100);
+      const chargeCents = promoCodeRow.value;
+      const preTaxDollars = (chargeCents / 100) / (1 + GST_RATE);
+      promoDiscountDollars = Math.max(0, subtotalDollars - preTaxDollars);
     }
-    discountDollars = Math.min(discountDollars, subtotalDollars);
+    promoDiscountDollars = Math.min(promoDiscountDollars, subtotalDollars);
   }
 
-  const totalDollars = Math.max(0, subtotalDollars - discountDollars);
-  const discountPct = subtotalDollars > 0 ? (discountDollars / subtotalDollars) * 100 : 0;
+  const totalDollars = Math.max(0, subtotalDollars - promoDiscountDollars);
+  const catalogSubtotal = perVisitSubtotal * visitCount;
+  const totalDiscountDollars = Math.max(0, catalogSubtotal - totalDollars);
+  const discountPct = catalogSubtotal > 0 ? (totalDiscountDollars / catalogSubtotal) * 100 : 0;
+  const totalCents = Math.round(totalDollars * 100);
+  const chargeCents = promoCodeRow?.type === 'quote_price'
+    ? promoCodeRow.value
+    : preTaxCentsToChargeCents(totalCents);
+  const taxCents = Math.max(0, chargeCents - totalCents);
 
   return {
     ok: true,
@@ -263,8 +346,10 @@ export async function computePricing(
       basePriceCents: Math.round(basePrice * 100),
       addOnTotalCents: Math.round(addOnTotal * 100),
       discountPct: Math.round(discountPct),
-      discountAmountCents: Math.round(discountDollars * 100),
-      totalCents: Math.round(totalDollars * 100),
+      discountAmountCents: Math.round(totalDiscountDollars * 100),
+      totalCents,
+      taxCents,
+      chargeCents,
       promoCodeRow,
     },
   };
@@ -446,8 +531,13 @@ export async function writeBooking(
     dateLabel: formatDateLabel(payload.date),
     timeLabel: formatTimeLabel(payload.time),
     address: payload.serviceAddress,
-    totalLabel: payload.totalCents > 0 ? formatMoney(payload.totalCents, config.currency) : 'FREE',
+    totalLabel: payload.totalCents > 0
+      ? formatMoney(preTaxCentsToChargeCents(payload.totalCents), config.currency)
+      : 'FREE',
     bookingId,
+    calendarDate: payload.date,
+    calendarTime: payload.time,
+    calendarHours: payload.estimatedHours,
   };
   const emailsOk = await sendBookingEmails(env, config, emailData);
 
@@ -488,15 +578,33 @@ export function buildEmailMetadata(
   p: BookingWritePayload,
   config: BookingConfig,
 ): Record<string, string> {
+  const subtotalCents = p.basePriceCents + p.addOnTotalCents;
+  const afterDiscount = Math.max(0, p.totalCents);
+  const taxCents = p.totalCents > 0 ? Math.round(afterDiscount * GST_RATE) : 0;
+  const grandCents = afterDiscount + taxCents;
+
   return {
     svcLabel: serviceLabel(p.serviceKey),
     dateLabel: formatDateLabel(p.date),
     timeLabel: formatTimeLabel(p.time),
-    totalLabel: p.totalCents > 0 ? formatMoney(p.totalCents, config.currency) : 'FREE',
+    totalLabel: p.totalCents > 0 ? formatMoney(grandCents, config.currency) : 'FREE',
     bizName: config.businessName,
     bizFrom: config.fromEmail,
     bizReplyTo: config.replyToEmail ?? '',
     bizNotify: config.notifyEmail ?? '',
+    bizSiteOrigin: config.siteOrigin,
+    bizLogoUrl: config.emailLogoUrl,
+    bizLocationLabel: config.locationLabel ?? '',
+    bizRequiresAddress: config.requiresAddress ? 'true' : 'false',
+    calDate: p.date,
+    calTime: p.time,
+    calHours: String(p.estimatedHours),
+    calTz: config.timezone,
+    bizEmailTheme: serializeEmailTheme(),
+    bizPhone: config.businessPhone ?? '',
+    bizCallLabel: config.callLabel,
+    bizPlaceId: config.placeId ?? '',
+    ...buildInvoiceMetadata(p, config),
   };
 }
 

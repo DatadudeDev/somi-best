@@ -4,6 +4,7 @@
  */
 
 import type { BookingConfig, Env } from './config.ts';
+import { buildCalendarIcsUrl } from './calendar-ics.ts';
 import { emailTheme as t } from './email-theme.ts';
 
 export interface BookingEmailData {
@@ -16,6 +17,9 @@ export interface BookingEmailData {
   address: string | null;
   totalLabel: string;
   bookingId: string;
+  calendarDate: string;
+  calendarTime: string;
+  calendarHours: number;
 }
 
 export interface EmailBrandContext {
@@ -24,6 +28,7 @@ export interface EmailBrandContext {
   logoUrl: string;
   requiresAddress: boolean;
   locationLabel?: string;
+  timezone: string;
 }
 
 function esc(s: string): string {
@@ -118,6 +123,55 @@ function secondaryButtonLink(href: string, label: string): string {
   );
 }
 
+function gridCell(content: string, side: 'left' | 'right', row: 'top' | 'bottom'): string {
+  const padRight = side === 'left' ? 'padding-right:5px;' : 'padding-left:5px;';
+  const padBottom = row === 'top' ? 'padding-bottom:10px;' : '';
+  return `<td width="50%" valign="top" style="width:50%;${padRight}${padBottom}">${content}</td>`;
+}
+
+function gridPrimaryLink(href: string, label: string): string {
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">`
+    + `<tr><td align="center" style="background-color:${t.accent};border-radius:14px;box-shadow:0 2px 8px rgba(255,184,0,0.25);">`
+    + `<a href="${esc(href)}" style="display:block;padding:14px 28px;color:${t.accentOn};font-family:${t.fontBody};font-size:14px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;text-align:center;">${esc(label)}</a>`
+    + `</td></tr></table>`
+  );
+}
+
+function gridSecondaryLink(href: string, label: string): string {
+  return secondaryButtonLink(href, label);
+}
+
+function gridSecondarySpan(label: string): string {
+  return secondaryButtonSpan(label);
+}
+
+function businessActionGrid(
+  brand: EmailBrandContext,
+  d: BookingEmailData,
+): string {
+  const callCell = d.customerPhone
+    ? gridCell(gridSecondaryLink(`tel:${d.customerPhone.replace(/\D/g, '')}`, 'Call client'), 'left', 'top')
+    : gridCell(gridSecondarySpan('Call client'), 'left', 'top');
+  const replyCell = gridCell(gridPrimaryLink(`mailto:${d.customerEmail}`, 'Reply to client'), 'right', 'top');
+  const calUrl = buildCalendarIcsUrl(brand.siteOrigin, {
+    date: d.calendarDate,
+    time: d.calendarTime,
+    title: `${d.serviceLabel} — ${d.customerName}`,
+    hours: d.calendarHours,
+    timezone: brand.timezone,
+    description: `Booked via ${brand.businessName}`,
+  });
+  const calendarCell = gridCell(gridSecondaryLink(calUrl, 'Add to calendar'), 'left', 'bottom');
+  const scheduleCell = gridCell(gridSecondarySpan('View Schedule'), 'right', 'bottom');
+  return (
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;width:100%;">`
+    + `<tr>${callCell}${replyCell}</tr>`
+    + `<tr>${calendarCell}${scheduleCell}</tr>`
+    + `</table>`
+  );
+}
+
 function customerDetailRows(d: BookingEmailData, brand: EmailBrandContext): string {
   const rows = [
     detailRow('When', `${esc(d.dateLabel)} at ${esc(d.timeLabel)}`),
@@ -174,13 +228,8 @@ export function buildBusinessNoticeEmail(brand: EmailBrandContext, d: BookingEma
     + `<h1 style="margin:0 0 14px;font-family:${t.fontDisplay};font-size:28px;line-height:1.12;letter-spacing:0.03em;font-weight:800;text-transform:uppercase;color:${t.heading};">${esc(d.customerName)} · ${esc(d.dateLabel.split(',')[0] ?? d.dateLabel)}</h1>`
     + `<p style="margin:0 0 24px;font-family:${t.fontBody};font-size:15px;line-height:1.55;color:${t.textMuted};">A new <strong style="color:${t.textPrimary};font-weight:600;">${esc(d.serviceLabel)}</strong> session was booked online.</p>`
     + detailPanel(rows.join(''))
-    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;"><tr><td align="center">`
-    + primaryButton(`mailto:${d.customerEmail}`, 'Reply to customer')
-    + secondaryButtonLink(`tel:${d.customerPhone.replace(/\D/g, '')}`, 'Call customer')
-    + `</td></tr></table>`
-    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:22px 0;">`
-    + `<span style="font-family:${t.fontBody};font-size:12px;font-weight:500;color:${t.textMuted};letter-spacing:0.06em;opacity:0.6;">OR</span></td></tr></table>`
-    + `<p style="margin:0;font-family:${t.fontBody};font-size:13px;line-height:1.55;color:${t.textMuted};">Automated booking alert — add the session to your calendar if needed.</p>`
+    + businessActionGrid(brand, d)
+    + `<p style="margin:16px 0 0;font-family:${t.fontBody};font-size:13px;line-height:1.55;color:${t.textMuted};">Automated booking alert — add the session to your calendar if needed.</p>`
     + footerBlock(brand, `${brand.businessName} · Internal booking alert`);
 
   return emailShell(inner);
@@ -193,6 +242,7 @@ export function emailBrandFromConfig(config: BookingConfig): EmailBrandContext {
     logoUrl: config.emailLogoUrl,
     requiresAddress: config.requiresAddress,
     locationLabel: config.locationLabel,
+    timezone: config.timezone,
   };
 }
 

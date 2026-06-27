@@ -40,6 +40,12 @@ export interface Env {
   EMAIL_LOGO_URL?: string;
   /** Short location line in email footer (e.g. "Calgary, AB"). */
   EMAIL_LOCATION_LABEL?: string;
+  /** Public business phone for email call buttons. */
+  BUSINESS_PHONE?: string;
+  /** Google Place ID for email footer location link. */
+  PLACE_ID?: string;
+  /** Call-button label in customer emails (e.g. "Call BEST Therapy"). */
+  BUSINESS_CALL_LABEL?: string;
 }
 
 export interface BookingConfig {
@@ -63,11 +69,17 @@ export interface BookingConfig {
   emailLogoUrl: string;
   /** Optional footer location label. */
   locationLabel?: string;
+  /** Public business phone for customer email call button. */
+  businessPhone: string | null;
+  /** Customer email call-button label. */
+  callLabel: string;
+  /** Google Place ID for email footer maps link. */
+  placeId?: string;
 }
 
 /** Resolve per-client config from Pages env vars with sane defaults. */
 export function resolveConfig(env: Env): BookingConfig {
-  const siteOrigin = (env.SITE_ORIGIN || 'https://besttherapeutics.com').trim().replace(/\/$/, '');
+  const siteOrigin = (env.SITE_ORIGIN || 'https://treytherapy.com').trim().replace(/\/$/, '');
   return {
     currency: (env.CURRENCY || 'usd').trim().toLowerCase(),
     timezone: (env.TIMEZONE || 'America/Edmonton').trim(),
@@ -77,8 +89,11 @@ export function resolveConfig(env: Env): BookingConfig {
     fromEmail: (env.FROM_EMAIL || 'bookings@send.somi.ceo').trim(),
     requiresAddress: env.BOOKING_REQUIRES_ADDRESS === 'true',
     siteOrigin,
-    emailLogoUrl: (env.EMAIL_LOGO_URL || `${siteOrigin}/images/best/logo-mark.png`).trim(),
+    emailLogoUrl: (env.EMAIL_LOGO_URL || `${siteOrigin}/images/best/logo-wordmark.png`).trim(),
     locationLabel: env.EMAIL_LOCATION_LABEL?.trim() || undefined,
+    businessPhone: env.BUSINESS_PHONE?.trim() || null,
+    callLabel: (env.BUSINESS_CALL_LABEL || 'Call BEST Therapy').trim(),
+    placeId: env.PLACE_ID?.trim() || undefined,
   };
 }
 

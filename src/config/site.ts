@@ -4,13 +4,14 @@
  */
 
 export const site = {
-  name: 'BEST Therapeutics',
+  name: 'BEST Therapy',
   nameShort: 'BEST',
   logoSub: 'Better Every Second Therapeutics',
   tagline: 'Active recovery. Every second counts.',
   subtagline: 'Precision therapy for athletes who refuse to slow down.',
 
-  domain: 'https://besttherapeutics.com',
+  domain: (import.meta.env.VITE_SITE_ORIGIN as string | undefined)?.replace(/\/$/, '')
+    || 'https://treytherapy.com',
 
   contact: {
     email: 'hello@treytherapy.com',

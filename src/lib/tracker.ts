@@ -94,10 +94,17 @@ function captureAttribution() {
 
 // ─── Flush Queue ─────────────────────────────────────────────────────────────
 
+/** When set, events POST to this endpoint; otherwise observers are skipped in production. */
+const ANALYTICS_ENDPOINT = import.meta.env.VITE_ANALYTICS_ENDPOINT as string | undefined;
+
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function flush() {
-  // Template: analytics API removed — drain queue locally only.
+  if (!ANALYTICS_ENDPOINT) {
+    state.queue.length = 0;
+    return;
+  }
+  // Future: POST state.queue to ANALYTICS_ENDPOINT
   state.queue.length = 0;
 }
 
@@ -265,14 +272,14 @@ export const tracker = {
     if (state.initialized) return;
     state.sid = getOrCreateSessionId();
     captureAttribution();
-    setupSPATracking();
-    setupScrollTracking();
-    setupWebVitals();
-    setupUnloadTracking();
+    if (import.meta.env.DEV || ANALYTICS_ENDPOINT) {
+      setupSPATracking();
+      setupScrollTracking();
+      setupWebVitals();
+      setupUnloadTracking();
+      trackPageView();
+    }
     state.initialized = true;
-
-    // Track initial page view
-    trackPageView();
   },
 
   /** Track a custom event */

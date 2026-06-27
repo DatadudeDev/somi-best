@@ -1,8 +1,7 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSEO, seoMeta } from '../lib/useSEO';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Elements } from '@stripe/react-stripe-js';
 import { colors, fonts, typography } from '../styles/tokens';
 import { site } from '../config/site';
 import { addOns as addOnData, frequencyDiscounts, PKG_DISPLAY_NAME, PRICES, SIZE_LABELS, type Frequency, type SizeKey, type Pkg } from '../data/pricing';
@@ -11,10 +10,9 @@ import { bookingRequiresAddress } from '../lib/booking/booking-config';
 import { getMockDaySlots, getMockMonthAvailability, getFirstAvailableMonth, monthHasAvailability, isBookingApiEnabled } from '../lib/booking/mock-availability';
 import BookingStepper from '../components/ui/BookingStepper';
 import Button from '../components/ui/Button';
-import PaymentForm from '../components/ui/PaymentForm';
-import { getStripe, getStripeFor, hasStripeKey } from '../lib/stripe';
+import PhoneInput from '../components/ui/PhoneInput';
+import LazyAddressField, { type AddressResult } from '../components/ui/LazyAddressField';
 import { clarityEvent, clarityTag, clarityUpgrade } from '../lib/clarity';
-import AddressAutocomplete, { type AddressResult } from '../components/ui/AddressAutocomplete';
 import { useTurnstile } from '../lib/useTurnstile';
 import { tracker } from '../lib/tracker';
 import QuoteIntakeForm from '../components/booking/QuoteIntakeForm';
@@ -39,9 +37,11 @@ import {
   CAL_SELECTED_LABEL_FONT,
 } from '../lib/booking/booking-helpers';
 import { SERVICE_DESC, SERVICE_INCLUDES, ADDONS_INCLUDED_IN, PKGS } from '../lib/booking/service-meta';
-import { formatPhoneNumber, validateName, validateEmail, validatePhone, parseFlexDate } from '../lib/booking/validation';
-import { STRIPE_APPEARANCE, navBtn, emptyCell, inputStyle, textareaStyle, inlineQtyBtn, fieldError } from '../lib/booking/booking-styles';
+import { validateName, validateEmail, validatePhone, parseFlexDate } from '../lib/booking/validation';
+import { navBtn, emptyCell, inputStyle, textareaStyle, inlineQtyBtn, fieldError } from '../lib/booking/booking-styles';
 import { ADDON_ICONS, ADDON_ICON_SIZE, ADDON_ICON_PADDING, ADDON_CARD_GAP } from '../components/booking/addon-icons';
+
+const BookStripeCheckout = lazy(() => import('../components/booking/BookStripeCheckout'));
 
 function bookingServiceKey(pkg: string, custom: boolean): string {
   if (custom || pkg === 'Custom') return 'tier1';
@@ -51,7 +51,19 @@ function bookingServiceKey(pkg: string, custom: boolean): string {
 export default function BookPage() {
   useSEO(seoMeta.book);
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const params = searchParams;
+  const step: 2 | 3 = searchParams.get('step') === 'checkout' ? 3 : 2;
+
+  const setBookingStep = useCallback((next: 2 | 3, replace = false) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (next === 3) nextParams.set('step', 'checkout');
+    else nextParams.delete('step');
+    setSearchParams(nextParams, { replace });
+  }, [searchParams, setSearchParams]);
+
+  const serviceSectionRef = useRef<HTMLDivElement>(null);
+  const scheduleSectionRef = useRef<HTMLDivElement>(null);
   const pkgParam = params.get('pkg') || 'Tier1';
   const sizeParam = params.get('size') || 's1';
 
@@ -82,14 +94,14 @@ export default function BookPage() {
   const prefilledTime = params.get('time');
   const prefilledNotes = params.get('notes');
 
-  const [step, setStep] = useState<2|3>(2);
   // Drag-drop state for custom quote mode
   const [isDragOver, setIsDragOver] = useState(false);
   const [pendingDropFiles, setPendingDropFiles] = useState<File[]>([]);
   // Quote prefill state
   const [quotePrefillDone, setQuotePrefillDone] = useState(false);
   const [quoteAlreadyConverted, setQuoteAlreadyConverted] = useState(false);
-  const { containerRef: turnstileRef, getToken: getTurnstileToken, reset: resetTurnstile } = useTurnstile('booking', step === 3);
+  const { containerRef: turnstileRef, reset: resetTurnstile } = useTurnstile('booking', step === 3);
+  const fetchedDayKeysRef = useRef(new Set<string>());
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
   const [expandedAddOn, setExpandedAddOn] = useState<string | null>(null);
   const [selectedPkg, setSelectedPkg] = useState(pkgParam);
@@ -171,8 +183,25 @@ export default function BookPage() {
     clarityEvent('booking_cta_click');
     clarityTag('booking_package', selectedPkg);
     tracker.bookingStep(3, { service: selectedPkg, size: selectedSize, frequency });
-    setStep(3);
+    setBookingStep(3);
   };
+
+  const handleStepperClick = useCallback((stepNum: number) => {
+    if (stepNum === 1) {
+      if (step === 3) setBookingStep(2, true);
+      serviceSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (stepNum === 2) {
+      if (step === 3) setBookingStep(2, true);
+      scheduleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (stepNum === 3) {
+      attemptContinueToStep3();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, canProceedToCheckout, selectedPkg, selectedSize, frequency, setBookingStep]);
 
   /* checkout state */
   const [selectedAddOns, setSelectedAddOns] = useState<Record<string,{on:boolean,qty:number}>>({});
@@ -208,10 +237,6 @@ export default function BookPage() {
   // Central-payments (Connect) — supplied by create-intent when USE_CENTRAL_PAYMENTS is on.
   const [stripeAccount, setStripeAccount] = useState<string | undefined>(undefined);
   const [publishableKey, setPublishableKey] = useState<string | undefined>(undefined);
-  const elementsStripe = useMemo(
-    () => (publishableKey ? getStripeFor(publishableKey, stripeAccount) : getStripe()),
-    [publishableKey, stripeAccount],
-  );
   const [intentLoading, setIntentLoading] = useState(false);
   const [intentError, setIntentError] = useState<string | null>(null);
   const [freeLoading, setFreeLoading] = useState(false);
@@ -298,11 +323,16 @@ export default function BookPage() {
         const data = await res.json() as { days: Record<string, MonthDaySummary> };
         setMonthAvailability(data.days ?? {});
       } else {
-        setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
+        if (import.meta.env.DEV) {
+          console.warn('[book] month availability API failed — empty calendar for', year, month + 1);
+        }
+        setMonthAvailability({});
       }
     } catch {
-      const serviceKey = bookingServiceKey(selectedPkg, isCustom);
-      setMonthAvailability(getMockMonthAvailability(year, month, serviceKey, selectedSize));
+      if (import.meta.env.DEV) {
+        console.warn('[book] month availability fetch error');
+      }
+      setMonthAvailability({});
     } finally {
       setMonthLoading(false);
     }
@@ -469,7 +499,7 @@ export default function BookPage() {
 
         // Skip directly to step 3 — user should NOT see step 2 again
         // The auto-create-intent effect will fire once formReady becomes true
-        setStep(3);
+        setBookingStep(3);
       })
       .catch(() => { /* ignore — leave form with defaults */ });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -492,12 +522,19 @@ export default function BookPage() {
     return monthAvailability[dateStr]?.slotCount ?? 0;
   };
 
+  useEffect(() => {
+    fetchedDayKeysRef.current.clear();
+  }, [selectedPkg, selectedSize, calYear, calMonth]);
+
   /* ── Fetch time slots for a specific day ── */
   const fetchDaySlots = useCallback(async (day: number) => {
     const dateStr = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'tier1' : selectedPkg.toLowerCase();
+    const cacheKey = `${dateStr}:${serviceKey}:${selectedSize}`;
+    if (fetchedDayKeysRef.current.has(cacheKey)) return;
+    fetchedDayKeysRef.current.add(cacheKey);
     setDayLoading(prev => ({ ...prev, [day]: true }));
     try {
-      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'tier1' : selectedPkg.toLowerCase();
       const fallback = getMockDaySlots(serviceKey, selectedSize);
 
       if (!bookingApiEnabled) {
@@ -512,11 +549,16 @@ export default function BookPage() {
         const data = await res.json() as { slots: AvailabilitySlot[]; available: boolean };
         setDaySlots(prev => ({ ...prev, [day]: data.slots ?? [] }));
       } else {
-        setDaySlots(prev => ({ ...prev, [day]: fallback }));
+        if (import.meta.env.DEV) {
+          console.warn('[book] day slots API failed for', dateStr);
+        }
+        setDaySlots(prev => ({ ...prev, [day]: [] }));
       }
     } catch {
-      const serviceKey = (isCustom || selectedPkg === 'Custom') ? 'tier1' : selectedPkg.toLowerCase();
-      setDaySlots(prev => ({ ...prev, [day]: getMockDaySlots(serviceKey, selectedSize) }));
+      if (import.meta.env.DEV) {
+        console.warn('[book] day slots fetch error for', dateStr);
+      }
+      setDaySlots(prev => ({ ...prev, [day]: [] }));
     } finally {
       setDayLoading(prev => ({ ...prev, [day]: false }));
     }
@@ -577,6 +619,7 @@ export default function BookPage() {
         notes: sessionNotes,
         promoCode: appliedPromo ?? undefined,
         frequency,
+        visitCount: selections.length || 1,
         ...(formattedServiceAddress ? { serviceAddress: formattedServiceAddress } : {}),
         ...(serviceAddressCoords ? { lat: serviceAddressCoords.lat, lng: serviceAddressCoords.lng } : {}),
         source: bookingSource,
@@ -620,6 +663,7 @@ export default function BookPage() {
       notes: body.notes,
       promoCode: body.promoCode,
       frequency: body.frequency,
+      visitCount: selections.length || 1,
       ...(isBusiness && {
         mode: 'business' as const,
         business_name: businessName,
@@ -669,20 +713,12 @@ export default function BookPage() {
     const built = buildCheckoutPayload();
     if (!built) return false;
 
-    let turnstileToken = '';
-    try {
-      turnstileToken = await getTurnstileToken();
-    } catch {
-      console.warn('[turnstile] token timeout — proceeding without');
-    }
-
     try {
       const res = await fetch('/api/bookings/update-intent', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentIntentId,
-          turnstileToken,
           ...built.body,
         }),
       });
@@ -696,7 +732,7 @@ export default function BookPage() {
       setIntentError('Network error while preparing payment.');
       return false;
     }
-  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload, getTurnstileToken]);
+  }, [paymentIntentId, isFreeBooking, buildCheckoutPayload]);
 
   const intentBootstrapReady = step === 3
     && !isCustom
@@ -722,10 +758,13 @@ export default function BookPage() {
     }
   }, [step]);
 
-  /* ── Update intent when cart or contact changes on step 3 ── */
+  /* ── Update intent when cart or contact changes on step 3 (debounced) ── */
   useEffect(() => {
     if (step !== 3 || !paymentIntentId || isFreeBooking || !checkoutInitialized) return;
-    syncPaymentIntent().catch(console.error);
+    const timer = window.setTimeout(() => {
+      syncPaymentIntent().catch(console.error);
+    }, 450);
+    return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAddOns, appliedPromo, frequency, contactName, contactEmail, contactPhone, formattedServiceAddress, sessionNotes]);
 
@@ -1014,7 +1053,11 @@ export default function BookPage() {
         <>
       <div className="book-outer" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 16px 60px' }}>
 
-        <BookingStepper currentStep={step} />
+        <BookingStepper
+          currentStep={step}
+          canGoToCheckout={canProceedToCheckout}
+          onStepClick={handleStepperClick}
+        />
 
         <style>{`
           /* ── Layout ── */
@@ -1145,7 +1188,7 @@ export default function BookPage() {
                   </div>
                 )}
                 {!isPrefill && !isCustom && (
-                <div style={{ marginBottom: '24px' }}>
+                <div ref={serviceSectionRef} style={{ marginBottom: '24px' }}>
                   <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '12px' }}>
                     SERVICE TYPE
                   </div>
@@ -1285,7 +1328,7 @@ export default function BookPage() {
                 {/* ── FREQUENCY SELECTOR (residential/business) or SERVICE SELECTOR (custom) ── */}
                 {isCustom && !isPrefill ? (
                   /* ── SELECT SERVICES — custom mode multi-select ── */
-                  <div style={{ marginBottom: '32px' }}>
+                  <div ref={serviceSectionRef} style={{ marginBottom: '32px' }}>
                     <div style={{ ...typography.sectionLabel, fontSize: '12px', color: colors.warmGray, marginBottom: '16px' }}>
                       SELECT SERVICES
                     </div>
@@ -1372,6 +1415,7 @@ export default function BookPage() {
                 )}
 
                 {/* Calendar header */}
+                <div ref={scheduleSectionRef}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                   <span style={{ ...typography.sectionLabel, fontSize: '13px', color: colors.warmGray }}>
                     {MONTH_NAMES[calMonth].toUpperCase()} {calYear}
@@ -1593,6 +1637,7 @@ export default function BookPage() {
                     )}
                   </div>
                 )}
+                </div>
               </>
             )}
 
@@ -1739,18 +1784,15 @@ export default function BookPage() {
 
                   {/* Phone */}
                   <div>
-                    <input
-                      placeholder="+1 (XXX) XXX-XXXX"
-                      type="tel"
+                    <PhoneInput
                       value={contactPhone}
-                      onChange={e => {
-                        const formatted = formatPhoneNumber(e.target.value);
-                        setContactPhone(formatted);
-                        if (phoneError) setPhoneError(validatePhone(formatted));
+                      onChange={(val) => {
+                        setContactPhone(val);
+                        if (phoneError) setPhoneError(validatePhone(val));
                         if (intentError) setIntentError(null);
                       }}
-                      onBlur={e => setPhoneError(validatePhone(e.target.value))}
-                      style={{ ...inputStyle, borderColor: phoneError ? '#df1b41' : undefined }}
+                      onBlur={() => setPhoneError(validatePhone(contactPhone))}
+                      borderColor={phoneError ? '#df1b41' : undefined}
                     />
                     {phoneError && <div style={fieldError}>{phoneError}</div>}
                   </div>
@@ -1759,7 +1801,7 @@ export default function BookPage() {
                   {bookingRequiresAddress && (
                   <div className="book-address-row">
                     <div style={{ flex: 1 }}>
-                      <AddressAutocomplete
+                      <LazyAddressField
                         placeholder={site.booking.checkout.addressPlaceholder}
                         value={serviceAddress}
                         onChange={setServiceAddress}
@@ -2056,97 +2098,45 @@ export default function BookPage() {
                   </div>
                 )}
 
-                {/* Stripe Payment Element — loads as soon as step 3 opens */}
+                {/* Stripe Payment Element — lazy-loaded on checkout step */}
                 {!isFreeBooking && (clientSecret || intentLoading) && (
-                  <div style={{
-                    background: colors.white,
-                    border: `1px solid ${colors.stone}`,
-                    borderRadius: '8px',
-                    padding: '24px',
-                    marginBottom: '32px',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-                      <svg width="38" height="16" viewBox="0 0 38 16" fill="none">
-                        <rect width="38" height="16" rx="3" fill="#635BFF"/>
-                        <text x="4" y="12" fill="white" fontSize="9" fontFamily="sans-serif">stripe</text>
-                      </svg>
-                      <span style={{ fontFamily: fonts.body, fontSize: '13px', color: colors.warmGray }}>Secured by Stripe</span>
+                  <Suspense fallback={
+                    <div style={{
+                      background: colors.white,
+                      border: `1px solid ${colors.stone}`,
+                      borderRadius: '8px',
+                      padding: '24px',
+                      marginBottom: '32px',
+                      textAlign: 'center' as const,
+                      fontFamily: fonts.body,
+                      fontSize: '14px',
+                      color: colors.warmGray,
+                    }}>
+                      Loading payment form…
                     </div>
-
-                    {clientSecret && (hasStripeKey || publishableKey) ? (
-                    <Elements
-                      stripe={elementsStripe}
-                      options={{
-                        clientSecret,
-                        ...(customerSessionClientSecret ? { customerSessionClientSecret } : {}),
-                        appearance: STRIPE_APPEARANCE,
-                      }}
-                    >
-                      <PaymentForm
-                        returnUrl={window.location.origin + '/book/confirmation'}
-                        total={grandTotal}
-                        frequencyLabel={frequencyDiscounts[frequency].label}
-                        canSubmit={contactValid}
-                        onBeforeConfirm={syncPaymentIntent}
-                        onSuccess={() => {
-                          handlePaymentSuccess();
-                        }}
-                        onError={(msg) => {
-                          setIntentError(msg);
-                        }}
-                      />
-                    </Elements>
-                    ) : clientSecret ? (
-                      <p style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray, lineHeight: 1.6, margin: 0 }}>
-                        Stripe is not configured for local preview. Copy <code>.env.example</code> to <code>.env</code> and set <code>VITE_STRIPE_PUBLISHABLE_KEY</code> to enable the payment form.
-                      </p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '16px 0' }}>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
-                          <circle cx="12" cy="12" r="10" stroke={colors.stone} strokeWidth="3"/>
-                          <path d="M12 2a10 10 0 0 1 10 10" stroke={colors.sageGreen} strokeWidth="3" strokeLinecap="round"/>
-                        </svg>
-                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                        <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.warmGray }}>Loading payment form…</span>
-                      </div>
-                    )}
-                    {paymentError && (
-                      <div style={{
-                        background: '#fff0f0',
-                        border: '1px solid #ffcccc',
-                        borderRadius: '6px',
-                        padding: '12px 16px',
-                        marginTop: '16px',
-                        fontFamily: 'inherit',
-                        fontSize: '14px',
-                        color: '#c0392b',
-                        lineHeight: 1.5,
-                      }}>
-                        {paymentError}
-                      </div>
-                    )}
-
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginTop: '16px', cursor: 'pointer', paddingTop: '16px', borderTop: '1px solid ' + colors.stone }}>
-                      <input
-                        type="checkbox"
-                        checked={billingSameAsService}
-                        onChange={e => setBillingSameAsService(e.target.checked)}
-                        style={{ marginTop: '3px', accentColor: colors.sageGreen, width: '16px', height: '16px', flexShrink: 0 }}
-                      />
-                      <span style={{ fontFamily: fonts.body, fontSize: '14px', color: colors.charcoal, lineHeight: 1.5 }}>
-                        {site.booking.checkout.billingSameLabel}
-                      </span>
-                    </label>
-                    {!billingSameAsService && (
-                      <AddressAutocomplete
-                        placeholder="Billing Address"
-                        value={billingAddress}
-                        onChange={setBillingAddress}
-                        onSelect={(r: AddressResult) => { setBillingAddress(r.formatted); }}
-                        style={{ ...inputStyle, marginTop: '12px' }}
-                      />
-                    )}
-                  </div>
+                  }>
+                    <BookStripeCheckout
+                      clientSecret={clientSecret}
+                      intentLoading={intentLoading}
+                      customerSessionClientSecret={customerSessionClientSecret}
+                      publishableKey={publishableKey}
+                      stripeAccount={stripeAccount}
+                      contactName={contactName}
+                      contactEmail={contactEmail}
+                      contactPhone={contactPhone}
+                      contactValid={contactValid}
+                      grandTotal={grandTotal}
+                      frequencyLabel={frequencyDiscounts[frequency].label}
+                      billingSameAsService={billingSameAsService}
+                      onBillingSameChange={setBillingSameAsService}
+                      billingAddress={billingAddress}
+                      onBillingAddressChange={setBillingAddress}
+                      paymentError={paymentError}
+                      onBeforeConfirm={syncPaymentIntent}
+                      onSuccess={handlePaymentSuccess}
+                      onError={setIntentError}
+                    />
+                  </Suspense>
                 )}
 
                 <p style={{

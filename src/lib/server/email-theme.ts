@@ -16,3 +16,19 @@ export const emailTheme = {
   fontBody: "'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif",
   fontDisplay: "'Barlow Condensed','Arial Narrow',sans-serif",
 } as const;
+
+/** Compact JSON for Stripe metadata (bizEmailTheme key, max 500 chars). */
+export function serializeEmailTheme(): string {
+  return JSON.stringify({
+    a: emailTheme.accent,
+    ao: emailTheme.accentOn,
+    bo: emailTheme.bgOuter,
+    bc: emailTheme.bgCard,
+    be: emailTheme.bgElevated,
+    bd: emailTheme.border,
+    tp: emailTheme.textPrimary,
+    tm: emailTheme.textMuted,
+    h: emailTheme.heading,
+    sh: emailTheme.cardShadow,
+  });
+}

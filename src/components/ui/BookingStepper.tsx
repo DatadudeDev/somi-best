@@ -2,6 +2,8 @@ import { colors, fonts } from '../../styles/tokens';
 
 interface BookingStepperProps {
   currentStep: number; // 1 = Service (done), 2 = Schedule, 3 = Checkout
+  onStepClick?: (stepNum: number) => void;
+  canGoToCheckout?: boolean;
 }
 
 const steps = [
@@ -10,7 +12,15 @@ const steps = [
   { num: 3, label: 'Checkout' },
 ];
 
-export default function BookingStepper({ currentStep }: BookingStepperProps) {
+export default function BookingStepper({ currentStep, onStepClick, canGoToCheckout = false }: BookingStepperProps) {
+  const isClickable = (stepNum: number): boolean => {
+    if (!onStepClick) return false;
+    if (stepNum === currentStep) return stepNum <= 2;
+    if (stepNum < currentStep) return true;
+    if (stepNum === 3) return canGoToCheckout;
+    return false;
+  };
+
   return (
     <>
       <style>{`
@@ -27,26 +37,52 @@ export default function BookingStepper({ currentStep }: BookingStepperProps) {
           margin: 0 16px;
           flex-shrink: 0;
         }
+        .book-stepper-hit {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border: none;
+          background: transparent;
+          padding: 4px 0;
+          cursor: default;
+          font: inherit;
+          text-align: left;
+        }
+        .book-stepper-hit--clickable {
+          cursor: pointer;
+        }
+        .book-stepper-hit--clickable:hover .book-stepper-label {
+          color: ${colors.sageGreen};
+        }
         @media (max-width: 768px) {
           .book-stepper-label { display: none; }
           .book-stepper-connector { width: 20px; margin: 0 8px; }
         }
       `}</style>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0',
-        padding: '24px 0',
-      }}>
+      <nav
+        aria-label="Booking progress"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0',
+          padding: '24px 0',
+        }}
+      >
         {steps.map((step, i) => {
           const isComplete = step.num < currentStep;
           const isActive = step.num === currentStep;
           const isPending = step.num > currentStep;
+          const clickable = isClickable(step.num);
 
           return (
             <div key={step.num} style={{ display: 'flex', alignItems: 'center' }}>
-              {/* Step circle + label */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                className={`book-stepper-hit${clickable ? ' book-stepper-hit--clickable' : ''}`}
+                disabled={!clickable}
+                aria-current={isActive ? 'step' : undefined}
+                onClick={() => clickable && onStepClick?.(step.num)}
+              >
                 <div style={{
                   width: '28px',
                   height: '28px',
@@ -63,7 +99,7 @@ export default function BookingStepper({ currentStep }: BookingStepperProps) {
                   border: isPending ? `1.5px solid ${colors.stone}` : 'none',
                 }}>
                   {isComplete ? (
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
                       <path d="M2.5 7L5.5 10L11.5 4" stroke={colors.cream} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   ) : step.num}
@@ -74,9 +110,8 @@ export default function BookingStepper({ currentStep }: BookingStepperProps) {
                 >
                   {step.label}
                 </span>
-              </div>
+              </button>
 
-              {/* Connector line */}
               {i < steps.length - 1 && (
                 <div
                   className="book-stepper-connector"
@@ -88,7 +123,7 @@ export default function BookingStepper({ currentStep }: BookingStepperProps) {
             </div>
           );
         })}
-      </div>
+      </nav>
     </>
   );
 }
